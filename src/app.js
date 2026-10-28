@@ -3135,6 +3135,19 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     $('fabricColor').value = S.fabricColor;
     $('knockout').checked = S.knockout;
   }
+  // machine, hoop and fabric choices are remembered on this computer for the next visit
+  function saveSetup() {
+    try { localStorage.setItem('ss-setup', JSON.stringify({ hoop: S.hoop, hoopTurn: !!S.hoopTurn, fabric: S.fabric, fabricColor: S.fabricColor })); } catch (e) { }
+  }
+  function loadSetup() {
+    try {
+      const d = JSON.parse(localStorage.getItem('ss-setup') || 'null');
+      if (!d) return;
+      if (HOOPS.some((h) => h.id === d.hoop)) { S.hoop = d.hoop; S.hoopTurn = !!d.hoopTurn; }
+      if (FABRICS[d.fabric]) S.fabric = d.fabric;
+      if (/^#[0-9a-f]{6}$/i.test(d.fabricColor || '')) S.fabricColor = d.fabricColor;
+    } catch (e) { }
+  }
   function fillHoopSel(br) { $('hoopSel').innerHTML = HOOP_BRANDS[br].hoops.map((h) => `<option value="${h.id}">${h.name}</option>`).join(''); }
   $('brandSel').innerHTML = Object.entries(HOOP_BRANDS).map(([k, b]) => `<option value="${k}">${b.name}</option>`).join('');
   $('brandSel').onchange = (e) => {
@@ -3146,15 +3159,15 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     for (const h of list) { const d = Math.abs(h.w * h.h - cur.w * cur.h) + (h.w >= cur.w && h.h >= cur.h ? 0 : 1e5); if (d < bd) { bd = d; best = h; } }
     S.hoop = best.id;
     if (HOOP_BRANDS[br].export) { ui.machine = HOOP_BRANDS[br].export; try { localStorage.setItem('ss-machine', ui.machine); } catch (er) { } }
-    syncSettingsUI(); checkpoint(); renderStats(); fitView();
+    syncSettingsUI(); checkpoint(); renderStats(); fitView(); saveSetup();
     toast(`${HOOP_BRANDS[br].name} hoops loaded. Using the ${best.name.replace(/\s*\(.*/, '')} hoop.`);
   };
-  $('hoopTurn').onchange = (e) => { S.hoopTurn = e.target.checked; checkpoint(); renderStats(); fitView(); };
+  $('hoopTurn').onchange = (e) => { S.hoopTurn = e.target.checked; checkpoint(); renderStats(); fitView(); saveSetup(); };
   $('fabricSel').innerHTML = Object.entries(FABRICS).map(([k, f]) => `<option value="${k}">${f.name}</option>`).join('');
-  $('hoopSel').onchange = (e) => { S.hoop = e.target.value; checkpoint(); renderStats(); fitView(); };
-  $('fabricSel').onchange = (e) => { S.fabric = e.target.value; syncSettingsUI(); checkpoint(); changed(); toast('Density, underlay and pull compensation updated for ' + fab().name.toLowerCase() + '.'); };
+  $('hoopSel').onchange = (e) => { S.hoop = e.target.value; checkpoint(); renderStats(); fitView(); saveSetup(); };
+  $('fabricSel').onchange = (e) => { S.fabric = e.target.value; syncSettingsUI(); checkpoint(); changed(); saveSetup(); toast('Density, underlay and pull compensation updated for ' + fab().name.toLowerCase() + '.'); };
   $('fabricColor').oninput = (e) => { S.fabricColor = e.target.value; draw(); };
-  $('fabricColor').onchange = () => checkpoint();
+  $('fabricColor').onchange = () => { checkpoint(); saveSetup(); };
   $('knockout').onchange = (e) => { S.knockout = e.target.checked; checkpoint(); changed(); };
 
   /* ---------------- left panel wiring ---------------- */
@@ -3256,6 +3269,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
 
   /* ---------------- boot ---------------- */
   try { const m = localStorage.getItem('ss-machine'); if (m) ui.machine = m; } catch (e) { }
+  loadSetup();
   readTheme();
   if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { readTheme(); draw(); });
   new MutationObserver(() => { readTheme(); draw(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
