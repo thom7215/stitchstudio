@@ -1762,9 +1762,11 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const rh = e.button === 0 ? resizeHandleAt(wx, wy) : null;
     if (rh) {
       const bb = unionBBox(selected());
-      // anchor = the opposite handle (in world units, without the visual padding)
-      const ax = rh.hx === 0 ? (bb.x0 + bb.x1) / 2 : rh.hx < 0 ? bb.x1 : bb.x0;
-      const ay = rh.hy === 0 ? (bb.y0 + bb.y1) / 2 : rh.hy < 0 ? bb.y1 : bb.y0;
+      // corners scale around the centre, so the design stays where it is;
+      // side handles stretch from the opposite side (in world units, without the visual padding)
+      const corner = rh.hx !== 0 && rh.hy !== 0;
+      const ax = corner || rh.hx === 0 ? (bb.x0 + bb.x1) / 2 : rh.hx < 0 ? bb.x1 : bb.x0;
+      const ay = corner || rh.hy === 0 ? (bb.y0 + bb.y1) / 2 : rh.hy < 0 ? bb.y1 : bb.y0;
       dragState = { mode: 'resize', h: rh, bb, ax, ay, sx: 1, sy: 1, moving: false, x: e.offsetX, y: e.offsetY };
       return;
     }
@@ -2770,7 +2772,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       <span>mm</span></div>
       <div class="row"><span class="lbl inline">Scale by</span><input type="number" id="szPct" min="5" max="1000" step="5" value="100" style="width:76px" aria-label="Scale percent"><span>%</span>
         <button type="button" class="tiny ghost" data-pct="50">50%</button><button type="button" class="tiny ghost" data-pct="90">90%</button><button type="button" class="tiny ghost" data-pct="110">110%</button><button type="button" class="tiny ghost" data-pct="200">200%</button></div>
-      <p class="hint">Or drag a handle on the hoop: corners keep the proportions, sides stretch. Hold Shift on a corner to stretch freely.</p>`;
+      <p class="hint">Or drag a handle on the hoop: corners resize around the centre and keep the proportions, sides stretch. Hold Shift on a corner to stretch freely.</p>`;
   }
   function wireSizeBox(list) {
     const w = $('szW'), h = $('szH'), l = $('szLock');
