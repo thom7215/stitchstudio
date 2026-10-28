@@ -2389,7 +2389,7 @@ const Core = (() => {
 
   return {
     clamp, dist, lerp, ringArea, ringsArea, perimeter, bbox, pointInRings, segDist, simplify,
-    analyze, generate, assemble, runPath, resample, edgeIndex, edgeList, catmull, autoGuides, guidePreview, measureWidths, captureEdges, ctrlFrames, railDense, snapToEdge, columnPreview, autoColumns, nearestOnRings, railSnap, railSlide, nodeHandles, borderPreview,
+    analyze, generate, assemble, runPath, resample, edgeIndex, edgeList, catmull, autoGuides, guidePreview, measureWidths, captureEdges, ctrlFrames, railDense, snapToEdge, columnPreview, autoColumns, nearestOnRings, railSnap, railSlide, nodeHandles, borderPreview, edgePath,
   };
 })();
 if (typeof module !== 'undefined') module.exports = Core;
@@ -5200,14 +5200,44 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       }
       else {
         const r = railRef(co, h);
-        const n = r.pts.length;
-        const segs = [h.pi - 1, h.pi].filter((k) => k >= 0 && k < r.modes.length || (r.closed && k === -1)).map((k) => (k + r.modes.length) % r.modes.length);
-        if (!dragState.modes0) dragState.modes0 = r.modes.slice();
-        const touchesEdge = segs.some((k) => dragState.modes0[k] === 'edge');
+        // always work from the rail as it was when the drag started
+        if (!dragState.orig) dragState.orig = { pts: r.pts.map((q) => q.slice()), modes: r.modes.slice(), handles: r.handles ? r.handles.slice() : null, pi: h.pi };
+        const O = dragState.orig, pi0 = O.pi, n = O.pts.length;
+        r.pts = O.pts.map((q) => q.slice()); r.modes = O.modes.slice(); if (O.handles) r.handles = O.handles.slice(); else delete r.handles;
+        const closed = !!r.closed && n >= 3;
+        const segIn = pi0 > 0 ? pi0 - 1 : (closed ? n - 1 : -1);
+        const segOut = pi0 < n - 1 ? pi0 : (closed ? n - 1 : -1);
+        const touchesEdge = [segIn, segOut].some((k) => k >= 0 && O.modes[k] === 'edge');
         // snap only when dropped right on the outline (Alt = never snap)
         const snapped = touchesEdge && !e.altKey ? Core.snapToEdge(co.rings, [wx, wy], 5 / view.s) : null;
-        r.pts[h.pi] = snapped || [wx, wy];
-        for (const k of segs) r.modes[k] = dragState.modes0[k] === 'edge' && !snapped ? 'curve' : dragState.modes0[k];
+        const np = snapped || [wx, wy];
+        let pi = pi0;
+        if (touchesEdge && !snapped) {
+          // the traced parts stay on the outline: only a short piece next to this dot leaves the edge and curves to it
+          const pull = Core.dist(O.pts[pi0], np);
+          const along = (P, s) => { let acc = 0; for (let k = 1; k < P.length; k++) { const L = Core.dist(P[k - 1], P[k]); if (acc + L >= s) { const t = L ? (s - acc) / L : 0; return [P[k - 1][0] + (P[k][0] - P[k - 1][0]) * t, P[k - 1][1] + (P[k][1] - P[k - 1][1]) * t]; } acc += L; } return P[P.length - 1].slice(); };
+          const plen = (P) => { let L = 0; for (let k = 1; k < P.length; k++) L += Core.dist(P[k - 1], P[k]); return L; };
+          const ins = (at, pt, modeBefore, modeAfter, seg) => {
+            r.pts.splice(at, 0, pt);
+            r.modes[seg] = modeBefore; r.modes.splice(seg + 1, 0, modeAfter);
+            if (r.handles) r.handles.splice(at, 0, null);
+          };
+          // the piece after the dot first, so the index of the piece before it does not move
+          let shift = 0;
+          if (segOut >= 0 && O.modes[segOut] === 'edge') {
+            const P = Core.edgePath(co.rings, O.pts[pi0], O.pts[(pi0 + 1) % n]), L = plen(P);
+            if (L > 3) { const d = Core.clamp(1.2 * pull + 1, 1.5, 0.45 * L); ins(pi0 + 1, along(P, d), 'curve', 'edge', segOut); shift = 1; }
+            else r.modes[segOut] = 'curve';
+          }
+          if (segIn >= 0 && O.modes[segIn] === 'edge') {
+            // on a closed rail the piece before dot 0 is the last one, which moved along if a dot was just added after dot 0
+            const a = segIn + (segIn > pi0 ? shift : 0), P = Core.edgePath(co.rings, O.pts[segIn], O.pts[pi0]), L = plen(P);
+            if (L > 3) { const d = Core.clamp(1.2 * pull + 1, 1.5, 0.45 * L); ins(a + 1, along(P, L - d), 'edge', 'curve', a); if (a + 1 <= pi) pi++; }
+            else r.modes[segIn] = 'curve';
+          }
+        }
+        r.pts[pi] = np;
+        h.pi = pi;
         dragState.unsnapped = touchesEdge && !snapped;
       }
       touch(co); scheduleGen(); draw();
@@ -5274,7 +5304,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       const moved = dragState.moving, uns = dragState.unsnapped, conv = dragState.converted;
       dragState = null;
       if (moved && conv) toast('That part of the rail is now a curve shaped by the handles.', 3600);
-      if (moved) { checkpoint(); changed(); if (uns) toast('That dot is off the edge, so the rail now runs as a smooth curve through it. Drop it on the edge to follow the outline again, or press Tab to change.', 5200); }
+      if (moved) { checkpoint(); changed(); if (uns) toast('The rail still follows the outline you traced; only the short piece next to this dot curves off to it. New dots mark where it leaves the edge, and you can move them too.', 5600); }
       return;
     }
     if (dragState.mode === 'rungline') {

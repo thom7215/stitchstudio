@@ -1920,7 +1920,7 @@ const Core = (() => {
 
   return {
     clamp, dist, lerp, ringArea, ringsArea, perimeter, bbox, pointInRings, segDist, simplify,
-    analyze, generate, assemble, runPath, resample, edgeIndex, edgeList, catmull, autoGuides, guidePreview, measureWidths, captureEdges, ctrlFrames, railDense, snapToEdge, columnPreview, autoColumns, nearestOnRings, railSnap, railSlide, nodeHandles, borderPreview,
+    analyze, generate, assemble, runPath, resample, edgeIndex, edgeList, catmull, autoGuides, guidePreview, measureWidths, captureEdges, ctrlFrames, railDense, snapToEdge, columnPreview, autoColumns, nearestOnRings, railSnap, railSlide, nodeHandles, borderPreview, edgePath,
   };
 })();
 if (typeof module !== 'undefined') module.exports = Core;
