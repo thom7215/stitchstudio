@@ -297,6 +297,20 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     }
   }
   async function scale(list, sx, sy, cx, cy) {
+    await scaleObjects(list, sx, sy, cx, cy);
+    // the Text tab must show the new size, or the next text change would put the old size back
+    const ed = ui.editingText && objById(ui.editingText);
+    if (ed && list.includes(ed)) { setTxtH(ed.text.height); syncTextUI(); }
+  }
+  function setTxtH(h) {
+    const el = $('txtH');
+    el.max = Math.max(80, Math.ceil(h)); el.min = Math.min(4, Math.floor(h * 2) / 2);
+    el.value = h;
+    // the slider rounds to its step; remember the exact size so an untouched slider keeps it
+    ui.txtHReal = h; ui.txtHShown = +el.value;
+  }
+  const formHeight = () => { const v = +$('txtH').value; return ui.txtHReal != null && v === ui.txtHShown ? ui.txtHReal : v; };
+  async function scaleObjects(list, sx, sy, cx, cy) {
     for (const o of list) {
       if (o.text) {
         const oh = o.text.height;
@@ -364,20 +378,20 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     return {
       str: $('txt').value.replace(/\s+$/, ''),
       font: ui.font || 'sans-serif', bold: ui.bold, italic: ui.italic,
-      height: +$('txtH').value, spacing: +$('txtSp').value, curve: +$('txtCv').value,
+      height: formHeight(), spacing: +$('txtSp').value, curve: +$('txtCv').value,
       lineSpacing: +$('txtLs').value, align: ui.align || 'center',
     };
   }
   function writeTextForm(t) {
     $('txt').value = t.str; ui.font = t.font; ui.bold = t.bold; ui.italic = t.italic;
-    $('txtH').value = t.height; $('txtSp').value = t.spacing; $('txtCv').value = t.curve;
+    setTxtH(t.height); $('txtSp').value = t.spacing; $('txtCv').value = t.curve;
     $('txtLs').value = t.lineSpacing || 1; ui.align = t.align || 'center';
     syncTextUI();
     renderFontList();
   }
   function syncTextUI() {
     $('boldBtn').setAttribute('aria-pressed', ui.bold); $('italBtn').setAttribute('aria-pressed', ui.italic);
-    $('txtHo').textContent = (+$('txtH').value).toFixed(1).replace(/\.0$/, '') + ' mm';
+    $('txtHo').textContent = formHeight().toFixed(1).replace(/\.0$/, '') + ' mm';
     $('txtSpo').textContent = $('txtSp').value;
     const ls = +$('txtLs').value;
     $('txtLso').textContent = Math.abs(ls - 1) < 0.001 ? 'Normal' : ls.toFixed(2).replace(/0$/, '') + '×';
@@ -2414,9 +2428,9 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       const k = r.dataset.param;
       r.oninput = () => {
         const v = +r.value;
-        const out = r.parentElement.querySelector('output');
+        const out = rowOf(r).querySelector('output');
         if (out) out.textContent = k === 'angle' || k === 'satinAngle' ? v + '°' : k === 'shortAmt' ? (v === 0 ? 'Off' : Math.round(v * 100) + '%') : ((k === 'pull' || k === 'spacing') ? v.toFixed(2) : v.toFixed(1)) + ' mm';
-        const dial = r.parentElement.querySelector('svg');
+        const dial = rowOf(r).querySelector('svg');
         if (dial && (k === 'angle' || k === 'satinAngle')) dial.outerHTML = angleDial(v);
         for (const q of selected()) q.params[k] = v;
         scheduleGen(); draw();
@@ -2668,7 +2682,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     if (!tb) return;
     tb.onclick = () => { if (ui.tool === 'border') { keepDraft(); setTool(null); } else setTool('border'); };
     const nw = $('bNewW');
-    nw.oninput = () => { ui.borderW = +nw.value; nw.parentElement.querySelector('output').textContent = ui.borderW.toFixed(1) + ' mm'; syncDrawBar(); };
+    nw.oninput = () => { ui.borderW = +nw.value; rowOf(nw).querySelector('output').textContent = ui.borderW.toFixed(1) + ' mm'; syncDrawBar(); };
     const bl = document.querySelector('.guides.bords');
     if (bl) sortable(bl, 'li[data-bi]', (from, to) => {
       const [m] = o.borders.splice(from, 1); o.borders.splice(to, 0, m);
@@ -2687,7 +2701,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const b = a && (a.rail === 'R' || a.kind === 'bline') && o.borders ? o.borders[a.ci] : null;
     if (!b) return;
     const w = $('bW');
-    w.oninput = () => { b.width = +w.value; w.parentElement.querySelector('output').textContent = b.width.toFixed(1) + ' mm'; ui.borderW = b.width; touch(o); scheduleGen(); draw(); };
+    w.oninput = () => { b.width = +w.value; rowOf(w).querySelector('output').textContent = b.width.toFixed(1) + ' mm'; ui.borderW = b.width; touch(o); scheduleGen(); draw(); };
     w.onchange = () => { checkpoint(); w.blur(); renderInspector(); };
     $('bAlign').querySelectorAll('[data-al]').forEach((x) => x.onclick = () => { b.align = x.dataset.al; ui.borderAlign = b.align; touch(o); checkpoint(); changed(); });
     $('bRev').onclick = () => {
@@ -2783,7 +2797,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     });
     const live = (el, fn, fmt) => {
       if (!el) return;
-      el.oninput = () => { const v = +el.value; fn(v); el.parentElement.querySelector('output').textContent = fmt(v); touch(o); scheduleGen(); draw(); };
+      el.oninput = () => { const v = +el.value; fn(v); rowOf(el).querySelector('output').textContent = fmt(v); touch(o); scheduleGen(); draw(); };
       el.onchange = () => { checkpoint(); el.blur(); renderInspector(); };
     };
     live($('pwAll'), (v) => { g.w = g.w.map(() => v); }, (v) => v.toFixed(1) + ' mm');
@@ -3311,9 +3325,57 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     });
   }
 
+
+  /* ---------------- fine-adjust arrows beside every slider ---------------- */
+  // the row a slider belongs to (its output and dial live there), whether or not it has arrows
+  function rowOf(el) { const w = el.closest('.rangewrap'); return (w || el).parentElement; }
+  function nudgeRange(input, dir) {
+    const step = +input.step || 1, min = input.min === '' ? 0 : +input.min, max = input.max === '' ? 100 : +input.max;
+    const dec = (String(input.step).split('.')[1] || '').length;
+    const v = Math.min(max, Math.max(min, +(+input.value + dir * step).toFixed(dec)));
+    if (v === +input.value) return false;
+    input.value = v;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  }
+  function addSteppers(root) {
+    (root || document).querySelectorAll('input[type=range]:not([data-nostep])').forEach((input) => {
+      if (input.parentElement && input.parentElement.classList.contains('rangewrap')) return;
+      const wrap = document.createElement('span');
+      wrap.className = 'rangewrap';
+      input.parentNode.insertBefore(wrap, input);
+      wrap.appendChild(input);
+      const lbl = input.getAttribute('aria-label') || (input.id && document.querySelector(`label[for="${input.id}"]`) ? document.querySelector(`label[for="${input.id}"]`).textContent : 'value');
+      const box = document.createElement('span');
+      box.className = 'stepper';
+      box.innerHTML = `<button type="button" data-dir="1" aria-label="Increase ${esc(lbl)}" title="Up one step (hold to keep going)">▲</button><button type="button" data-dir="-1" aria-label="Decrease ${esc(lbl)}" title="Down one step (hold to keep going)">▼</button>`;
+      wrap.appendChild(box);
+      box.querySelectorAll('button').forEach((b) => {
+        let t1 = null, t2 = null, changed = false;
+        const stop = () => {
+          clearTimeout(t1); clearInterval(t2); t1 = t2 = null;
+          if (changed) { changed = false; input.dispatchEvent(new Event('change', { bubbles: true })); }
+        };
+        b.addEventListener('pointerdown', (e) => {
+          if (e.button !== 0) return;
+          e.preventDefault();
+          changed = nudgeRange(input, +b.dataset.dir) || changed;
+          t1 = setTimeout(() => { t2 = setInterval(() => { changed = nudgeRange(input, +b.dataset.dir) || changed; }, 70); }, 420);
+        });
+        b.addEventListener('pointerup', stop);
+        b.addEventListener('pointerleave', stop);
+        b.addEventListener('pointercancel', stop);
+        // keyboard (Enter or Space on the arrow)
+        b.addEventListener('click', (e) => { if (e.detail === 0 && nudgeRange(input, +b.dataset.dir)) input.dispatchEvent(new Event('change', { bubbles: true })); });
+      });
+    });
+  }
+  new MutationObserver(() => addSteppers()).observe(document.body, { childList: true, subtree: true });
+
   /* ---------------- boot ---------------- */
   try { const m = localStorage.getItem('ss-machine'); if (m) ui.machine = m; } catch (e) { }
   loadSetup();
+  addSteppers();
   readTheme();
   if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { readTheme(); draw(); });
   new MutationObserver(() => { readTheme(); draw(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
