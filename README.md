@@ -2,7 +2,9 @@
 
 A simple embroidery digitizer that runs entirely in your browser. Load an SVG or type text in any font on your computer, pick how each part is stitched, and export a file for your machine.
 
-**Try it:** open `dist/index.html` in Chrome, Edge, Firefox or Safari. It is one self-contained file with no install, server or internet connection needed.
+**Use it online:** https://thom7215.github.io/stitchstudio/
+
+Or open `index.html` (also in `dist/`) in Chrome, Edge, Firefox or Safari. It is one self-contained file with no install, server or internet connection needed.
 
 ## Features
 
@@ -28,8 +30,9 @@ src/
   formats.js   machine file writers and a minimal ZIP writer
   import.js    SVG import and text tracing
   app.js       user interface
-build.py       bundles src/ into dist/index.html
-dist/index.html  the built app
+build.py       bundles src/ into index.html and dist/index.html
+index.html     the built app, served by GitHub Pages
+dist/index.html  the same built app
 tests/         development checks (Playwright and Node scripts)
 ```
 
@@ -39,7 +42,7 @@ tests/         development checks (Playwright and Node scripts)
 python3 build.py
 ```
 
-This writes `dist/index.html`. No dependencies are needed for the build.
+This writes `index.html` (served by GitHub Pages) and `dist/index.html`. No dependencies are needed for the build.
 
 ## Tests
 
