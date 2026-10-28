@@ -312,18 +312,23 @@ const Importer = (() => {
     ctx.font = font;
     const capH = ctx.measureText('H').actualBoundingBoxAscent || px * 0.7;
     const lines = (t.str || '').split('\n');
-    const lineH = px * 1.25;
+    const lineH = px * 1.25 * (t.lineSpacing || 1);
     const spacingPx = (t.spacing || 0) / 100 * px;
-    // layout every character
+    const align = t.align || 'center';
+    // layout every character: measure each line, then line them up on the left, centre or right
     const glyphs = [];
-    lines.forEach((ln, li) => {
+    const measured = lines.map((ln) => {
       const chars = Array.from(ln);
       const adv = chars.map((ch) => ctx.measureText(ch).width + spacingPx);
       const total = adv.reduce((s, v) => s + v, 0) - (chars.length ? spacingPx : 0);
-      let x = -total / 2;
-      chars.forEach((ch, k) => { glyphs.push({ ch, x, w: adv[k] - spacingPx, line: li }); x += adv[k]; });
-      glyphs.lineWidth = Math.max(glyphs.lineWidth || 0, total);
+      return { chars, adv, total };
     });
+    const widestLine = Math.max(0, ...measured.map((m) => m.total));
+    measured.forEach(({ chars, adv, total }, li) => {
+      let x = align === 'left' ? -widestLine / 2 : align === 'right' ? widestLine / 2 - total : -total / 2;
+      chars.forEach((ch, k) => { glyphs.push({ ch, x, w: adv[k] - spacingPx, line: li }); x += adv[k]; });
+    });
+    glyphs.lineWidth = widestLine;
     const curve = t.curve || 0;
     const widest = glyphs.lineWidth || px;
     const placed = glyphs.map((g) => {

@@ -74,6 +74,8 @@
         </div>
         <div class="field"><label for="txtH">Letter height</label><input id="txtH" type="range" min="4" max="80" step="0.5" value="12"><output id="txtHo">12 mm</output></div>
         <div class="field"><label for="txtSp">Letter spacing</label><input id="txtSp" type="range" min="-10" max="40" step="1" value="0"><output id="txtSpo">0</output></div>
+        <div class="field"><label for="txtLs">Line spacing</label><input id="txtLs" type="range" min="0.6" max="2.5" step="0.05" value="1"><output id="txtLso">Normal</output></div>
+        <div class="field"><span class="lbl-inline">Lines</span><div class="seg" id="txtAlign" role="group" aria-label="Line alignment"><button type="button" data-align="left" aria-pressed="false">Left</button><button type="button" data-align="center" aria-pressed="true">Centre</button><button type="button" data-align="right" aria-pressed="false">Right</button></div></div>
         <div class="field"><label for="txtCv">Curve</label><input id="txtCv" type="range" min="-100" max="100" step="1" value="0"><output id="txtCvo">Straight</output></div>
         <button id="addTextBtn" class="primary wide">Add text to hoop</button>
         <p class="hint" id="textHint">Letters under 5 mm tall are hard to stitch cleanly.</p>

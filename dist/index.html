@@ -275,6 +275,9 @@ li.drop-after { box-shadow: inset 0 -3px 0 var(--accent); }
 .edgerun { display: grid; gap: 6px; border-top: 1px dashed var(--line); padding-top: 8px; margin-top: 2px; }
 .edgerun .opts { padding-left: 4px; }
 .edgerun .seg button { font-size: 12px; padding: 5px 7px; }
+#txtAlign { grid-column: 2 / 4; display: flex; }
+#txtAlign button { flex: 1; padding: 5px 6px; font-size: 12.5px; }
+#txtAlign button:disabled, #txtLs:disabled { opacity: 0.45; }
 
 </style>
 </head>
@@ -340,6 +343,8 @@ li.drop-after { box-shadow: inset 0 -3px 0 var(--accent); }
         </div>
         <div class="field"><label for="txtH">Letter height</label><input id="txtH" type="range" min="4" max="80" step="0.5" value="12"><output id="txtHo">12 mm</output></div>
         <div class="field"><label for="txtSp">Letter spacing</label><input id="txtSp" type="range" min="-10" max="40" step="1" value="0"><output id="txtSpo">0</output></div>
+        <div class="field"><label for="txtLs">Line spacing</label><input id="txtLs" type="range" min="0.6" max="2.5" step="0.05" value="1"><output id="txtLso">Normal</output></div>
+        <div class="field"><span class="lbl-inline">Lines</span><div class="seg" id="txtAlign" role="group" aria-label="Line alignment"><button type="button" data-align="left" aria-pressed="false">Left</button><button type="button" data-align="center" aria-pressed="true">Centre</button><button type="button" data-align="right" aria-pressed="false">Right</button></div></div>
         <div class="field"><label for="txtCv">Curve</label><input id="txtCv" type="range" min="-100" max="100" step="1" value="0"><output id="txtCvo">Straight</output></div>
         <button id="addTextBtn" class="primary wide">Add text to hoop</button>
         <p class="hint" id="textHint">Letters under 5 mm tall are hard to stitch cleanly.</p>
@@ -3125,18 +3130,23 @@ const Importer = (() => {
     ctx.font = font;
     const capH = ctx.measureText('H').actualBoundingBoxAscent || px * 0.7;
     const lines = (t.str || '').split('\n');
-    const lineH = px * 1.25;
+    const lineH = px * 1.25 * (t.lineSpacing || 1);
     const spacingPx = (t.spacing || 0) / 100 * px;
-    // layout every character
+    const align = t.align || 'center';
+    // layout every character: measure each line, then line them up on the left, centre or right
     const glyphs = [];
-    lines.forEach((ln, li) => {
+    const measured = lines.map((ln) => {
       const chars = Array.from(ln);
       const adv = chars.map((ch) => ctx.measureText(ch).width + spacingPx);
       const total = adv.reduce((s, v) => s + v, 0) - (chars.length ? spacingPx : 0);
-      let x = -total / 2;
-      chars.forEach((ch, k) => { glyphs.push({ ch, x, w: adv[k] - spacingPx, line: li }); x += adv[k]; });
-      glyphs.lineWidth = Math.max(glyphs.lineWidth || 0, total);
+      return { chars, adv, total };
     });
+    const widestLine = Math.max(0, ...measured.map((m) => m.total));
+    measured.forEach(({ chars, adv, total }, li) => {
+      let x = align === 'left' ? -widestLine / 2 : align === 'right' ? widestLine / 2 - total : -total / 2;
+      chars.forEach((ch, k) => { glyphs.push({ ch, x, w: adv[k] - spacingPx, line: li }); x += adv[k]; });
+    });
+    glyphs.lineWidth = widestLine;
     const curve = t.curve || 0;
     const widest = glyphs.lineWidth || px;
     const placed = glyphs.map((g) => {
@@ -3421,7 +3431,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   };
   const ui = {
     sel: new Set(), view: 'both', jumps: false, sim: 1, playing: false,
-    font: null, bold: false, italic: false, editingText: null,
+    font: null, bold: false, italic: false, align: 'center', editingText: null,
     lock: true, machine: 'pes',
     tool: null, draft: [], active: null, cursor: null, borderW: 1.5, borderAlign: 'center', drawWidthMode: 'shape', drawWidth: 2.5, colDraft: null, railMode: 'edge', snap: null,
   };
@@ -3571,7 +3581,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   /* ---------------- text ---------------- */
   // tracing is shared by every letter of a word, so it is cached by everything that changes the outlines
   const traceCache = new Map();
-  const textKey = (t) => JSON.stringify([t.str, t.font, !!t.bold, !!t.italic, +t.height, +t.spacing || 0, +t.curve || 0]);
+  const textKey = (t) => JSON.stringify([t.str, t.font, !!t.bold, !!t.italic, +t.height, +t.spacing || 0, +t.curve || 0, +t.lineSpacing || 1, t.align || 'center']);
   async function traceTextCached(t) {
     const key = textKey(t);
     let r = traceCache.get(key);
@@ -3599,11 +3609,13 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       str: $('txt').value.replace(/\s+$/, ''),
       font: ui.font || 'sans-serif', bold: ui.bold, italic: ui.italic,
       height: +$('txtH').value, spacing: +$('txtSp').value, curve: +$('txtCv').value,
+      lineSpacing: +$('txtLs').value, align: ui.align || 'center',
     };
   }
   function writeTextForm(t) {
     $('txt').value = t.str; ui.font = t.font; ui.bold = t.bold; ui.italic = t.italic;
     $('txtH').value = t.height; $('txtSp').value = t.spacing; $('txtCv').value = t.curve;
+    $('txtLs').value = t.lineSpacing || 1; ui.align = t.align || 'center';
     syncTextUI();
     renderFontList();
   }
@@ -3611,6 +3623,12 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     $('boldBtn').setAttribute('aria-pressed', ui.bold); $('italBtn').setAttribute('aria-pressed', ui.italic);
     $('txtHo').textContent = (+$('txtH').value).toFixed(1).replace(/\.0$/, '') + ' mm';
     $('txtSpo').textContent = $('txtSp').value;
+    const ls = +$('txtLs').value;
+    $('txtLso').textContent = Math.abs(ls - 1) < 0.001 ? 'Normal' : ls.toFixed(2).replace(/0$/, '') + '×';
+    $('txtAlign').querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.align === (ui.align || 'center')));
+    const multiLine = $('txt').value.replace(/\s+$/, '').includes('\n');
+    $('txtLs').disabled = !multiLine; $('txtAlign').querySelectorAll('button').forEach((b) => { b.disabled = !multiLine; });
+    $('txtAlign').title = multiLine ? '' : 'Type more than one line to line them up';
     const cv = +$('txtCv').value;
     $('txtCvo').textContent = cv === 0 ? 'Straight' : cv > 0 ? 'Arch ' + cv : 'Smile ' + (-cv);
     const h = +$('txtH').value;
@@ -3653,7 +3671,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       if (ed) {
         const members = wordOf(ed);
         const prev = ed.text;
-        const same = ['str', 'font', 'bold', 'italic', 'spacing', 'curve'].every((k) => prev[k] === t[k]) && ed.text.letter != null;
+        const same = ['str', 'font', 'bold', 'italic', 'spacing', 'curve'].every((k) => prev[k] === t[k]) && (prev.lineSpacing || 1) === t.lineSpacing && (prev.align || 'center') === t.align && ed.text.letter != null;
         const recolor = color !== ed.color;
         if (same) {
           // only the size or colour changed: keep every letter, its columns and its settings
@@ -6431,7 +6449,8 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   $('boldBtn').onclick = () => { ui.bold = !ui.bold; liveText(); };
   $('italBtn').onclick = () => { ui.italic = !ui.italic; liveText(); };
   $('txt').oninput = () => { liveText(); clearTimeout(renderFontList.t); renderFontList.t = setTimeout(renderFontList, 250); };
-  ['txtH', 'txtSp', 'txtCv'].forEach((id) => $(id).oninput = liveText);
+  ['txtH', 'txtSp', 'txtCv', 'txtLs'].forEach((id) => $(id).oninput = liveText);
+  $('txtAlign').querySelectorAll('button').forEach((b) => b.onclick = () => { ui.align = b.dataset.align; liveText(); });
   $('txtColor').oninput = () => { const o = ui.editingText && objById(ui.editingText); if (o) { for (const m of wordOf(o)) { m.color = normHex($('txtColor').value); m.ver = VER++; } draw(); renderLayers(); scheduleGen(); } };
   $('txtColor').onchange = () => { if (ui.editingText) { checkpoint(); changed(); } };
   $('addTextBtn').onclick = addOrUpdateText;

@@ -187,7 +187,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   };
   const ui = {
     sel: new Set(), view: 'both', jumps: false, sim: 1, playing: false,
-    font: null, bold: false, italic: false, editingText: null,
+    font: null, bold: false, italic: false, align: 'center', editingText: null,
     lock: true, machine: 'pes',
     tool: null, draft: [], active: null, cursor: null, borderW: 1.5, borderAlign: 'center', drawWidthMode: 'shape', drawWidth: 2.5, colDraft: null, railMode: 'edge', snap: null,
   };
@@ -337,7 +337,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   /* ---------------- text ---------------- */
   // tracing is shared by every letter of a word, so it is cached by everything that changes the outlines
   const traceCache = new Map();
-  const textKey = (t) => JSON.stringify([t.str, t.font, !!t.bold, !!t.italic, +t.height, +t.spacing || 0, +t.curve || 0]);
+  const textKey = (t) => JSON.stringify([t.str, t.font, !!t.bold, !!t.italic, +t.height, +t.spacing || 0, +t.curve || 0, +t.lineSpacing || 1, t.align || 'center']);
   async function traceTextCached(t) {
     const key = textKey(t);
     let r = traceCache.get(key);
@@ -365,11 +365,13 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       str: $('txt').value.replace(/\s+$/, ''),
       font: ui.font || 'sans-serif', bold: ui.bold, italic: ui.italic,
       height: +$('txtH').value, spacing: +$('txtSp').value, curve: +$('txtCv').value,
+      lineSpacing: +$('txtLs').value, align: ui.align || 'center',
     };
   }
   function writeTextForm(t) {
     $('txt').value = t.str; ui.font = t.font; ui.bold = t.bold; ui.italic = t.italic;
     $('txtH').value = t.height; $('txtSp').value = t.spacing; $('txtCv').value = t.curve;
+    $('txtLs').value = t.lineSpacing || 1; ui.align = t.align || 'center';
     syncTextUI();
     renderFontList();
   }
@@ -377,6 +379,12 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     $('boldBtn').setAttribute('aria-pressed', ui.bold); $('italBtn').setAttribute('aria-pressed', ui.italic);
     $('txtHo').textContent = (+$('txtH').value).toFixed(1).replace(/\.0$/, '') + ' mm';
     $('txtSpo').textContent = $('txtSp').value;
+    const ls = +$('txtLs').value;
+    $('txtLso').textContent = Math.abs(ls - 1) < 0.001 ? 'Normal' : ls.toFixed(2).replace(/0$/, '') + '×';
+    $('txtAlign').querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.align === (ui.align || 'center')));
+    const multiLine = $('txt').value.replace(/\s+$/, '').includes('\n');
+    $('txtLs').disabled = !multiLine; $('txtAlign').querySelectorAll('button').forEach((b) => { b.disabled = !multiLine; });
+    $('txtAlign').title = multiLine ? '' : 'Type more than one line to line them up';
     const cv = +$('txtCv').value;
     $('txtCvo').textContent = cv === 0 ? 'Straight' : cv > 0 ? 'Arch ' + cv : 'Smile ' + (-cv);
     const h = +$('txtH').value;
@@ -419,7 +427,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       if (ed) {
         const members = wordOf(ed);
         const prev = ed.text;
-        const same = ['str', 'font', 'bold', 'italic', 'spacing', 'curve'].every((k) => prev[k] === t[k]) && ed.text.letter != null;
+        const same = ['str', 'font', 'bold', 'italic', 'spacing', 'curve'].every((k) => prev[k] === t[k]) && (prev.lineSpacing || 1) === t.lineSpacing && (prev.align || 'center') === t.align && ed.text.letter != null;
         const recolor = color !== ed.color;
         if (same) {
           // only the size or colour changed: keep every letter, its columns and its settings
@@ -3197,7 +3205,8 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   $('boldBtn').onclick = () => { ui.bold = !ui.bold; liveText(); };
   $('italBtn').onclick = () => { ui.italic = !ui.italic; liveText(); };
   $('txt').oninput = () => { liveText(); clearTimeout(renderFontList.t); renderFontList.t = setTimeout(renderFontList, 250); };
-  ['txtH', 'txtSp', 'txtCv'].forEach((id) => $(id).oninput = liveText);
+  ['txtH', 'txtSp', 'txtCv', 'txtLs'].forEach((id) => $(id).oninput = liveText);
+  $('txtAlign').querySelectorAll('button').forEach((b) => b.onclick = () => { ui.align = b.dataset.align; liveText(); });
   $('txtColor').oninput = () => { const o = ui.editingText && objById(ui.editingText); if (o) { for (const m of wordOf(o)) { m.color = normHex($('txtColor').value); m.ver = VER++; } draw(); renderLayers(); scheduleGen(); } };
   $('txtColor').onchange = () => { if (ui.editingText) { checkpoint(); changed(); } };
   $('addTextBtn').onclick = addOrUpdateText;
