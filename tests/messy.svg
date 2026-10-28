@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="120mm" height="80mm" viewBox="0 0 600 400">
+<style>.leaf{fill:#2e8b57}.stem{fill:none;stroke:#5b3a1e;stroke-width:6px}</style>
+<defs><path id="petal" d="M0 0 C 20 -40, 60 -40, 80 0 C 60 40, 20 40, 0 0 Z"/></defs>
+<rect width="600" height="400" fill="#ffffff"/>
+<g transform="translate(300 200) scale(1.2)">
+  <g fill="#e85d75"><use xlink:href="#petal" transform="rotate(0)"/><use xlink:href="#petal" transform="rotate(72)"/><use xlink:href="#petal" transform="rotate(144)"/><use xlink:href="#petal" transform="rotate(216)"/><use xlink:href="#petal" transform="rotate(288)"/></g>
+  <circle r="22" fill="#ffd23f"/>
+</g>
+<path class="stem" d="M300 260 Q 290 330 300 390"/>
+<path class="leaf" d="M300 330 a 40 18 -30 1 1 70 -40 a 40 18 -30 0 1 -70 40z"/>
+<polyline points="40,380 80,350 120,380 160,350" fill="none" stroke="#333" stroke-width="1.5"/>
+<ellipse cx="520" cy="80" rx="40" ry="25" fill="rgb(60,120,200)" stroke="#1a2a60" stroke-width="5"/>
+<text x="10" y="30">ignored text</text>
+</svg>

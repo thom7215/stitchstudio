@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stitch Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link id="webFontsCss" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Pacifico&family=Lobster&family=Great+Vibes&family=Dancing+Script:wght@700&family=Oswald:wght@600&family=Anton&family=Alfa+Slab+One&family=Righteous&family=Satisfy&family=Permanent+Marker&family=Playfair+Display:wght@700&family=Fredoka:wght@600&family=Kaushan+Script&display=swap" rel="stylesheet">
+<style>
+/*__CSS__*/
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><rect x="7" y="4" width="18" height="4" rx="1.5" fill="currentColor"/><rect x="7" y="24" width="18" height="4" rx="1.5" fill="currentColor"/><rect x="9" y="8" width="14" height="16" fill="var(--accent)"/><path d="M9 11l14 3M9 15l14 3M9 19l14 3" stroke="var(--panel)" stroke-width="1.2"/></svg>
+      <span>Stitch Studio</span>
+      <span class="projname" id="projName" title="Project name">Untitled project</span>
+    </div>
+    <ol class="steps" aria-label="Steps">
+      <li id="step1"><b>1</b> Add artwork</li>
+      <li id="step2"><b>2</b> Pick stitches</li>
+      <li id="step3"><b>3</b> Export</li>
+    </ol>
+    <div class="actions">
+      <button id="undoBtn" class="ghost" title="Undo (Ctrl+Z)">Undo</button>
+      <button id="redoBtn" class="ghost" title="Redo (Ctrl+Shift+Z)">Redo</button>
+      <button id="openBtn" class="ghost">Open project</button>
+      <button id="saveBtn" class="ghost">Save project</button>
+      <button id="exportBtn" class="primary">Export for my machine</button>
+    </div>
+  </header>
+
+  <main>
+    <aside class="left panel">
+      <nav class="tabs" id="leftTabs" role="tablist" aria-label="Add and set up">
+        <button type="button" role="tab" data-tab="art">Artwork</button>
+        <button type="button" role="tab" data-tab="text">Text</button>
+        <button type="button" role="tab" data-tab="hoop">Hoop &amp; fabric</button>
+      </nav>
+      <section data-ltab="art" role="tabpanel">
+        <h2>Add artwork</h2>
+        <label class="drop" id="drop" for="fileIn">
+          <input type="file" id="fileIn" accept=".svg,image/svg+xml,.json,application/json">
+          <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M12 16V4m0 0l-5 5m5-5l5 5M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <strong>Drop an SVG here</strong>
+          <span>or click to choose one. Every coloured shape becomes a stitch area.</span>
+        </label>
+        <div class="row">
+          <button id="sampleBtn" class="small">Load sample patch</button>
+          <button id="clearBtn" class="small ghost">Clear hoop</button>
+        </div>
+      </section>
+
+      <section id="textSection" data-ltab="text" role="tabpanel">
+        <h2>Add text</h2>
+        <p class="editing" id="textEditing" hidden>Editing the selected text. <button id="textNewBtn" class="link">Start new text instead</button></p>
+        <label for="txt" class="lbl">Your words</label>
+        <textarea id="txt" rows="2" spellcheck="false">Hello</textarea>
+        <label for="fontSearch" class="lbl">Font</label>
+        <input id="fontSearch" type="search" placeholder="Search fonts" autocomplete="off">
+        <div id="fontList" class="fontlist" role="listbox" aria-label="Fonts"></div>
+        <div class="row">
+          <button id="localFontsBtn" class="small ghost">Show all my computer's fonts</button>
+          <label class="btn small ghost" for="fontFile">Add font file<input id="fontFile" type="file" accept=".ttf,.otf,.woff,.woff2"></label>
+        </div>
+        <div class="row">
+          <button id="boldBtn" class="toggle small" aria-pressed="false"><b>Bold</b></button>
+          <button id="italBtn" class="toggle small" aria-pressed="false"><i>Italic</i></button>
+          <input id="txtColor" type="color" value="#1d2a6b" aria-label="Thread colour" title="Thread colour">
+        </div>
+        <div class="field"><label for="txtH">Letter height</label><input id="txtH" type="range" min="4" max="80" step="0.5" value="12"><output id="txtHo">12 mm</output></div>
+        <div class="field"><label for="txtSp">Letter spacing</label><input id="txtSp" type="range" min="-10" max="40" step="1" value="0"><output id="txtSpo">0</output></div>
+        <div class="field"><label for="txtCv">Curve</label><input id="txtCv" type="range" min="-100" max="100" step="1" value="0"><output id="txtCvo">Straight</output></div>
+        <button id="addTextBtn" class="primary wide">Add text to hoop</button>
+        <p class="hint" id="textHint">Letters under 5 mm tall are hard to stitch cleanly.</p>
+      </section>
+
+      <section data-ltab="hoop" role="tabpanel">
+        <h2>Hoop and fabric</h2>
+        <label for="brandSel" class="lbl">Machine</label>
+        <select id="brandSel"></select>
+        <label for="hoopSel" class="lbl">Hoop</label>
+        <select id="hoopSel"></select>
+        <label class="check"><input type="checkbox" id="hoopTurn"> Turn the hoop sideways</label>
+        <p class="tip" id="hoopNote" hidden></p>
+        <label for="fabricSel" class="lbl">Fabric</label>
+        <select id="fabricSel"></select>
+        <p class="tip" id="fabricTip"></p>
+        <div class="row">
+          <label for="fabricColor" class="lbl inline">Fabric colour</label>
+          <input id="fabricColor" type="color" value="#f4f1ea">
+        </div>
+        <label class="check"><input type="checkbox" id="knockout" checked> Skip stitching under shapes that cover it</label>
+      </section>
+    </aside>
+
+    <section class="stage">
+      <div class="canvaswrap" id="canvasWrap">
+        <canvas id="cv" tabindex="0" aria-label="Hoop preview"></canvas>
+        <div class="bubble" id="bubble"></div>
+        <div class="drawbar" id="drawBar" hidden>
+          <div class="dbhead"><b id="dbTitle">Drawing a satin column</b><span id="dbStep"></span></div>
+          <div class="row">
+            <span class="lbl inline">Rail follows</span>
+            <div class="seg" role="group" aria-label="How the rail runs between your clicks">
+              <button type="button" data-rm="edge">Shape edge</button><button type="button" data-rm="curve">Smooth curve</button><button type="button" data-rm="line">Straight line</button>
+            </div>
+            <kbd>Tab</kbd>
+          </div>
+          <div class="row">
+            <button type="button" id="dbFinish" class="primary small">✓ Finish this rail</button>
+            <button type="button" id="dbUndo" class="small ghost">↶ Undo last dot</button>
+            <button type="button" id="dbCancel" class="small ghost">Start column over</button>
+            <button type="button" id="dbDone" class="small ghost">Done</button>
+          </div>
+        </div>
+        <div class="busy" id="busy" hidden>Updating stitches…</div>
+        <div class="zoom">
+          <button id="zoomIn" title="Zoom in" aria-label="Zoom in">+</button>
+          <button id="zoomOut" title="Zoom out" aria-label="Zoom out">−</button>
+          <button id="zoomFit" title="Fit hoop">Fit</button>
+        </div>
+      </div>
+      <div class="stagebar">
+        <div class="seg" id="viewSeg" role="group" aria-label="View">
+          <button data-v="art">Artwork</button>
+          <button data-v="both">Both</button>
+          <button data-v="stitch">Stitches</button>
+        </div>
+        <label class="check"><input type="checkbox" id="jumpsChk"> Show jumps</label>
+        <div class="sim">
+          <button id="playBtn" class="small">▶ Watch it sew</button>
+          <input id="simRange" type="range" min="0" max="1000" value="1000" aria-label="Sewing progress">
+        </div>
+      </div>
+      <div class="stats" id="stats"></div>
+    </section>
+
+    <aside class="right panel">
+      <nav class="tabs" id="rightTabs" role="tablist" aria-label="Selected shape">
+        <button type="button" role="tab" data-tab="stitch">Stitch</button>
+        <button type="button" role="tab" data-tab="borders">Borders<span class="badge" id="bordersBadge"></span></button>
+        <button type="button" role="tab" data-tab="arrange">Arrange</button>
+        <button type="button" role="tab" data-tab="order">Sew order<span class="badge" id="orderBadge"></span></button>
+      </nav>
+      <section id="inspector"></section>
+      <section data-rtab="order" id="orderSection">
+        <h2>Sew order</h2>
+        <p class="hint">Top sews first. Drag to reorder.</p>
+        <ol id="layers" class="layers"></ol>
+        <button id="groupBtn" class="small ghost wide">Group same colours together</button>
+      </section>
+    </aside>
+  </main>
+</div>
+
+<dialog id="saveDlg">
+  <form method="dialog" id="saveForm">
+    <h2>Save project</h2>
+    <p class="sub">Saves everything so you can keep working on it later: shapes, stitch settings, manual columns, borders, hoop and fabric.</p>
+    <label for="saveName" class="lbl">Project name</label>
+    <div class="row nowrap"><input id="saveName" type="text" autocomplete="off" spellcheck="false"><span class="ext">.json</span></div>
+    <p class="hint" id="saveWhere"></p>
+    <div id="saveSummary" class="checks"></div>
+    <div class="dlgactions">
+      <span class="spacer"></span>
+      <button type="button" id="cancelSave" class="ghost">Cancel</button>
+      <button type="submit" id="doSave" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="exportDlg">
+  <form method="dialog" id="exportForm">
+    <h2>Export for your machine</h2>
+    <p class="sub">Pick your machine brand. The right file type is chosen for you.</p>
+    <div class="machines" id="machines"></div>
+    <label for="fileName" class="lbl">File name</label>
+    <input id="fileName" type="text" value="my-design">
+    <div id="exportChecks" class="checks"></div>
+    <h3>Thread colours, in sewing order</h3>
+    <ol id="threadList" class="threads"></ol>
+    <p class="note" id="claudeNote" hidden></p>
+    <div class="dlgactions">
+      <button type="button" id="pngBtn" class="ghost">Save preview picture</button>
+      <button type="button" id="getAppBtn" class="ghost" hidden>Get this app as a file</button>
+      <span class="spacer"></span>
+      <button type="button" id="cancelExport" class="ghost">Close</button>
+      <button type="button" id="doExport" class="primary">Download</button>
+    </div>
+  </form>
+</dialog>
+<input type="file" id="projIn" accept=".json,application/json" hidden>
+<div id="toast" role="status" aria-live="polite"></div>
+<script>
+/*__JS__*/
+</script>
+</body>
+</html>
