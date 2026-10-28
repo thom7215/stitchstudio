@@ -403,6 +403,20 @@ const Importer = (() => {
       if (r.length < 3 || Math.abs(Core.ringArea(r)) <= 0.02) continue;
       out.push(r); glyph.push(glyphOf(L));
     }
+    // a hole (the inside of an a, o, e…) always belongs to the outline around it, even when that outline
+    // was given to a neighbouring letter because the letters touch
+    const area = out.map((r) => Math.abs(Core.ringArea(r)));
+    const parent = out.map((r, i) => {
+      let best = -1;
+      for (let j = 0; j < out.length; j++) {
+        if (j === i || area[j] <= area[i]) continue;
+        if (Core.pointInRings(r[0][0], r[0][1], [out[j]]) && (best < 0 || area[j] < area[best])) best = j;
+      }
+      return best;
+    });
+    const depth = (i) => { let d = 0; for (let p = parent[i]; p >= 0; p = parent[p]) d++; return d; };
+    const outerOf = (i) => { let p = i; while (depth(p) % 2 === 1) p = parent[p]; return p; };
+    for (let i = 0; i < out.length; i++) if (depth(i) % 2 === 1) glyph[i] = glyph[outerOf(i)];
     out.glyph = glyph;
     out.chars = placed.map((g) => g.ch);
     return out;

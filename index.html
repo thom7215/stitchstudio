@@ -3221,6 +3221,20 @@ const Importer = (() => {
       if (r.length < 3 || Math.abs(Core.ringArea(r)) <= 0.02) continue;
       out.push(r); glyph.push(glyphOf(L));
     }
+    // a hole (the inside of an a, o, e…) always belongs to the outline around it, even when that outline
+    // was given to a neighbouring letter because the letters touch
+    const area = out.map((r) => Math.abs(Core.ringArea(r)));
+    const parent = out.map((r, i) => {
+      let best = -1;
+      for (let j = 0; j < out.length; j++) {
+        if (j === i || area[j] <= area[i]) continue;
+        if (Core.pointInRings(r[0][0], r[0][1], [out[j]]) && (best < 0 || area[j] < area[best])) best = j;
+      }
+      return best;
+    });
+    const depth = (i) => { let d = 0; for (let p = parent[i]; p >= 0; p = parent[p]) d++; return d; };
+    const outerOf = (i) => { let p = i; while (depth(p) % 2 === 1) p = parent[p]; return p; };
+    for (let i = 0; i < out.length; i++) if (depth(i) % 2 === 1) glyph[i] = glyph[outerOf(i)];
     out.glyph = glyph;
     out.chars = placed.map((g) => g.ch);
     return out;
@@ -3688,6 +3702,9 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
             await rebuildText(m);
             if (m.auto) autoPick(m);
           }
+          // a letter left with no outline of its own (its parts now belong to a touching letter) is dropped
+          const empty = members.filter((m) => !m.rings.length);
+          if (empty.length) { S.objects = S.objects.filter((q) => !empty.includes(q)); empty.forEach((m) => ui.sel.delete(m.id)); if (empty.some((m) => m.id === ui.editingText)) { const k = members.find((m) => m.rings.length); ui.editingText = k ? k.id : null; } }
         } else {
           if (members.some((m) => (m.columns && m.columns.length) || (m.guides && m.guides.length) || (m.borders && m.borders.length))) toast('The letters changed, so the hand-drawn columns and borders on them were cleared.', 4200);
           const place = { cx: prev.cx, cy: prev.cy, rot: prev.rot || 0, flip: !!prev.flip };

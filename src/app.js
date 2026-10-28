@@ -444,6 +444,9 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
             await rebuildText(m);
             if (m.auto) autoPick(m);
           }
+          // a letter left with no outline of its own (its parts now belong to a touching letter) is dropped
+          const empty = members.filter((m) => !m.rings.length);
+          if (empty.length) { S.objects = S.objects.filter((q) => !empty.includes(q)); empty.forEach((m) => ui.sel.delete(m.id)); if (empty.some((m) => m.id === ui.editingText)) { const k = members.find((m) => m.rings.length); ui.editingText = k ? k.id : null; } }
         } else {
           if (members.some((m) => (m.columns && m.columns.length) || (m.guides && m.guides.length) || (m.borders && m.borders.length))) toast('The letters changed, so the hand-drawn columns and borders on them were cleared.', 4200);
           const place = { cx: prev.cx, cy: prev.cy, rot: prev.rot || 0, flip: !!prev.flip };
