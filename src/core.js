@@ -1494,14 +1494,94 @@ const Core = (() => {
     marks.push({ sA: LA, sB: LB });
     return { A, B, CA, CB, LA, LB, closed, marks, rungs };
   }
+  // nearest point on a rail, looking only between rail positions s0 and s1 (closed rails may wrap past the end)
+  function projectWin(P, C, p, closed, s0, s1) {
+    const total = C[C.length - 1];
+    const segN = closed ? P.length : P.length - 1;
+    let best = Infinity, bs = (s0 + s1) / 2;
+    for (const shift of closed ? [-total, 0, total] : [0]) {
+      for (let i = 0; i < segN; i++) {
+        const lo = C[i] + shift, hi = C[i + 1] + shift;
+        if (hi < s0 || lo > s1) continue;
+        const a = P[i], b = P[(i + 1) % P.length];
+        const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy, L = Math.sqrt(L2);
+        let t = L2 ? clamp(((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L2, 0, 1) : 0;
+        let sv = lo + t * L;
+        if (sv < s0) { sv = s0; t = L ? (s0 - lo) / L : 0; } else if (sv > s1) { sv = s1; t = L ? (s1 - lo) / L : 0; }
+        const d = Math.hypot(a[0] + dx * t - p[0], a[1] + dy * t - p[1]);
+        if (d < best) { best = d; bs = sv; }
+      }
+    }
+    return bs;
+  }
+  /* How the two rails are matched between two rungs (or a rung and an end). Each point on one rail is
+     matched to the nearest point on the other, from both sides, and the two are averaged: the stitches then
+     cross the column at right angles to the rails, as far as the rails allow, instead of splitting each rail
+     evenly (which leans the stitches wherever one rail is longer, as on the outside of a curve). */
+  function perpMatch(lay, m0, m1, h) {
+    const { A, B, CA, CB, closed } = lay;
+    const a0 = m0.sA, a1 = m1.sA, b0 = m0.sB, b1 = m1.sB;
+    const dA = a1 - a0, dB = b1 - b0;
+    const nA = Math.max(2, Math.min(600, Math.ceil(dA / h))), nB = Math.max(2, Math.min(600, Math.ceil(dB / h)));
+    if (dA < 0.3 || dB < 0.3) return null;
+    const SA = [], F1 = [];
+    // only look near where an even split would put the match: stops a stitch jumping across the start of a
+    // loop or to the far side of a U-shaped stroke
+    const WB = Math.max(4, 0.35 * dB), WA = Math.max(4, 0.35 * dA);
+    for (let i = 0; i <= nA; i++) {
+      const sa = a0 + dA * i / nA, g = b0 + dB * i / nA;
+      SA.push(sa); F1.push(projectWin(B, CB, pointAt(A, CA, sa, closed), closed, Math.max(b0, g - WB), Math.min(b1, g + WB)));
+    }
+    // from the other rail: each point of B to its nearest on A, kept in order
+    const PA = [], PB = [];
+    let run = a0;
+    for (let j = 0; j <= nB; j++) {
+      const sb = b0 + dB * j / nB, g = a0 + dA * j / nB;
+      run = Math.max(run, projectWin(A, CA, pointAt(B, CB, sb, closed), closed, Math.max(a0, g - WA), Math.min(a1, g + WA)));
+      PA.push(run); PB.push(sb);
+    }
+    const F2 = SA.map((sa) => {
+      if (sa <= PA[0]) return PB[0];
+      if (sa >= PA[PA.length - 1]) return PB[PB.length - 1];
+      let lo = 0, hi = PA.length - 1;
+      while (hi - lo > 1) { const m = (lo + hi) >> 1; if (PA[m] < sa) lo = m; else hi = m; }
+      const span = PA[hi] - PA[lo];
+      return span > 1e-9 ? PB[lo] + (PB[hi] - PB[lo]) * (sa - PA[lo]) / span : PB[hi];
+    });
+    let F = F1.map((v, i) => (v + F2[i]) / 2);
+    // pin both ends to the rungs, then keep it running forwards
+    const e0 = b0 - F[0], e1 = b1 - F[F.length - 1];
+    F = F.map((v, i) => v + e0 + (e1 - e0) * i / nA);
+    for (let i = 1; i < F.length; i++) F[i] = Math.max(F[i], F[i - 1]);
+    F = F.map((v) => clamp(v, b0, b1));
+    if (F.some((v) => !isFinite(v))) return null;
+    return SA.map((sa, i) => [sa, F[i]]);
+  }
   function columnRungs(lay, step) {
     const out = [];
     const { A, B, CA, CB, closed, marks } = lay;
     for (let k = 0; k + 1 < marks.length; k++) {
       const m0 = marks[k], m1 = marks[k + 1];
       const dA = m1.sA - m0.sA, dB = m1.sB - m0.sB;
-      const n = Math.max(1, Math.ceil(Math.max(dA, dB) / step));
-      for (let i = 0; i < n; i++) out.push([pointAt(A, CA, m0.sA + dA * i / n, closed), pointAt(B, CB, m0.sB + dB * i / n, closed)]);
+      const M = perpMatch(lay, m0, m1, 0.25);
+      if (!M) {
+        const n = Math.max(1, Math.ceil(Math.max(dA, dB) / step));
+        for (let i = 0; i < n; i++) out.push([pointAt(A, CA, m0.sA + dA * i / n, closed), pointAt(B, CB, m0.sB + dB * i / n, closed)]);
+        continue;
+      }
+      // even spacing along whichever rail moves more, so the outside of a curve stays dense
+      const D = [0];
+      for (let i = 1; i < M.length; i++) D.push(D[i - 1] + Math.max(M[i][0] - M[i - 1][0], M[i][1] - M[i - 1][1], 1e-6));
+      const tot = D[D.length - 1];
+      const n = Math.max(1, Math.ceil(tot / step));
+      let j = 0;
+      for (let i = 0; i < n; i++) {
+        const d = tot * i / n;
+        while (j < D.length - 2 && D[j + 1] < d) j++;
+        const t = (d - D[j]) / ((D[j + 1] - D[j]) || 1);
+        const sa = M[j][0] + (M[j + 1][0] - M[j][0]) * t, sb = M[j][1] + (M[j + 1][1] - M[j][1]) * t;
+        out.push([pointAt(A, CA, sa, closed), pointAt(B, CB, sb, closed)]);
+      }
     }
     if (!closed) { const e = marks[marks.length - 1]; out.push([pointAt(A, CA, e.sA, false), pointAt(B, CB, e.sB, false)]); }
     return out;
@@ -1623,7 +1703,8 @@ const Core = (() => {
           rungs.push({ a: r.rungs[k][0], b: r.rungs[k][1] }); last = k;
         }
       }
-      cols.push({ A: mk(0), B: mk(1), rungs });
+      const A = mk(0), B = mk(1);
+      cols.push({ A, B, rungs });
     }
     return cols;
   }
