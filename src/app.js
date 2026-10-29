@@ -233,6 +233,9 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const d = JSON.parse(s);
     Object.assign(S, d);
     for (const id of [...ui.sel]) if (!objById(id)) ui.sel.delete(id);
+    // a selected dot, rung or column may not exist in the restored state
+    ui.active = null;
+    if (ui.editingText && !objById(ui.editingText)) ui.editingText = null;
     syncSettingsUI();
     changed(false);
   }
@@ -617,6 +620,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       Object.assign(S, { objects: d.objects, hoop: d.hoop || S.hoop, hoopTurn: !!d.hoopTurn, fabric: d.fabric || S.fabric, fabricColor: d.fabricColor || S.fabricColor, knockout: d.knockout !== false, nextId: d.nextId || 1 });
       S.objects.forEach((o) => { o.ver = VER++; S.nextId = Math.max(S.nextId, o.id + 1); });
       ui.sel = new Set(); ui.editingText = null;
+      selectionChanged(); // also leaves any drawing tool and forgets selected dots
       syncSettingsUI(); checkpoint(); changed(); fitView();
       toast(S.projectName ? `Opened “${S.projectName}”.` : 'Project opened.');
     } catch (e) { toast('That file is not a Stitch Studio project.'); }
@@ -2223,9 +2227,13 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     toast(`Deleted ${n} shape${n > 1 ? 's' : ''}. Press Ctrl+Z to undo.`);
   }
   function duplicateSelected() {
+    // copies form their own word or SVG group, so editing a copy never touches the original
+    const regroup = new Map();
+    const stamp = Date.now().toString(36);
     const copies = selected().map((o) => {
       const c = JSON.parse(JSON.stringify(o));
       c.id = S.nextId++; c.ver = VER++; c.name = o.name + ' copy';
+      if (c.group) { if (!regroup.has(c.group)) regroup.set(c.group, c.group.replace(/-.*$/, '') + '-' + stamp + '-' + regroup.size); c.group = regroup.get(c.group); }
       return c;
     });
     translate(copies, 5, 5);
@@ -2638,7 +2646,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const box = document.getElementById(id);
     if (!box) return;
     const commit = (er) => { set(er); touch(o); checkpoint(); changed(); };
-    box.querySelector('[data-er="on"]').onchange = (e) => commit(e.target.checked ? { on: true, mode: 'under', side: 'inside', triple: false, ...(get() || {}), on: true } : { ...(get() || {}), on: false });
+    box.querySelector('[data-er="on"]').onchange = (e) => commit(e.target.checked ? { mode: 'under', side: 'inside', triple: false, ...(get() || {}), on: true } : { ...(get() || {}), on: false });
     const tr = box.querySelector('[data-er="triple"]');
     if (tr) tr.onchange = (e) => commit({ ...get(), triple: e.target.checked });
     box.querySelectorAll('[data-erk]').forEach((sg) => sg.querySelectorAll('button').forEach((b) => b.onclick = () => commit({ ...get(), [sg.dataset.erk]: b.dataset.v })));
@@ -3090,7 +3098,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     } else if (inClaude()) {
       ok = await saveFile(`${name}.zip`, Formats.zip([{ name: `${name}.${m.ext}`, data: buildFile(m.id, name) }]));
     } else ok = await saveFile(`${name}.${m.ext}`, buildFile(m.id, name));
-    if (ok) { ui.exported = true; updateSteps(); toast('Saved. Copy the file to a USB stick or send it to your machine.'); }
+    if (ok) { ui.exported = true; updateSteps(); $('exportDlg').close(); toast('Saved. Copy the file to a USB stick or send it to your machine.'); }
   };
   $('getAppBtn').onclick = () => saveFile('stitch-studio.html', new TextEncoder().encode(ORIGINAL_HTML));
   $('pngBtn').onclick = async () => {
@@ -3241,7 +3249,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     if (/\.(ttf|otf|woff2?)$/i.test(f.name)) addFontFile(f); else loadFile(f);
   });
   $('sampleBtn').onclick = loadSample;
-  $('clearBtn').onclick = () => { if (!S.objects.length) return; S.objects = []; ui.sel = new Set(); ui.editingText = null; syncTextUI(); checkpoint(); changed(); toast('Hoop cleared. Press Ctrl+Z to bring it back.'); };
+  $('clearBtn').onclick = () => { if (!S.objects.length) return; S.objects = []; ui.sel = new Set(); ui.editingText = null; selectionChanged(); syncTextUI(); checkpoint(); changed(); toast('Hoop cleared. Press Ctrl+Z to bring it back.'); };
   $('fontList').onclick = (e) => {
     const b = e.target.closest('button[data-font]'); if (!b) return;
     ui.font = b.dataset.font;
@@ -3352,19 +3360,29 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       wrap.appendChild(box);
       box.querySelectorAll('button').forEach((b) => {
         let t1 = null, t2 = null, changed = false;
+        // the panel can be redrawn while an arrow is held, which removes the button before it hears the
+        // release; so the release is watched on the whole window, and repeating stops if the slider is gone
         const stop = () => {
           clearTimeout(t1); clearInterval(t2); t1 = t2 = null;
-          if (changed) { changed = false; input.dispatchEvent(new Event('change', { bubbles: true })); }
+          window.removeEventListener('pointerup', stop); window.removeEventListener('pointercancel', stop); window.removeEventListener('blur', stop);
+          if (changed) { changed = false; const cur = live(); if (cur) cur.dispatchEvent(new Event('change', { bubbles: true })); }
         };
+        // the same slider after a redraw (sliders are found again by their id or setting name)
+        const live = () => {
+          if (input.isConnected) return input;
+          if (input.id) return document.getElementById(input.id);
+          if (input.dataset.param) return document.querySelector(`input[type=range][data-param="${input.dataset.param}"]`);
+          return null;
+        };
+        const tick = () => { const cur = live(); if (!cur) { stop(); return; } changed = nudgeRange(cur, +b.dataset.dir) || changed; };
         b.addEventListener('pointerdown', (e) => {
           if (e.button !== 0) return;
           e.preventDefault();
-          changed = nudgeRange(input, +b.dataset.dir) || changed;
-          t1 = setTimeout(() => { t2 = setInterval(() => { changed = nudgeRange(input, +b.dataset.dir) || changed; }, 70); }, 420);
+          stop();
+          window.addEventListener('pointerup', stop); window.addEventListener('pointercancel', stop); window.addEventListener('blur', stop);
+          tick();
+          t1 = setTimeout(() => { t2 = setInterval(tick, 70); }, 420);
         });
-        b.addEventListener('pointerup', stop);
-        b.addEventListener('pointerleave', stop);
-        b.addEventListener('pointercancel', stop);
         // keyboard (Enter or Space on the arrow)
         b.addEventListener('click', (e) => { if (e.detail === 0 && nudgeRange(input, +b.dataset.dir)) input.dispatchEvent(new Event('change', { bubbles: true })); });
       });
