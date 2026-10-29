@@ -1395,6 +1395,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const o = colObj();
     if (!o) return;
     const px = 1 / s;
+    const RAIL = '#12a150'; // rails stand out in green against the blue selection and stitches
     ctx.save();
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     const pvs = colPreviews(o);
@@ -1411,12 +1412,12 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
             let dense = r.pts; try { dense = Core.railDense(r, o.rings); } catch (e) { }
             const p = line(dense, r.closed);
             ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 5 * px; ctx.stroke(p);
-            ctx.setLineDash([6 * px, 4 * px]); ctx.strokeStyle = theme.accent; ctx.lineWidth = 2.2 * px; ctx.stroke(p); ctx.setLineDash([]);
+            ctx.setLineDash([6 * px, 4 * px]); ctx.strokeStyle = RAIL; ctx.lineWidth = 2.2 * px; ctx.stroke(p); ctx.setLineDash([]);
           }
           r.pts.forEach((q, pi) => {
             const act = a && a.kind === 'rp' && a.ci === ci && a.rail === rail && a.pi === pi;
             ctx.beginPath(); ctx.arc(q[0], q[1], (act ? 6 : 4.5) * px, 0, Math.PI * 2);
-            ctx.fillStyle = act ? theme.accent : '#fff'; ctx.fill(); ctx.strokeStyle = theme.accent; ctx.lineWidth = 1.8 * px; ctx.stroke();
+            ctx.fillStyle = act ? RAIL : '#fff'; ctx.fill(); ctx.strokeStyle = RAIL; ctx.lineWidth = 1.8 * px; ctx.stroke();
           });
         }
         return;
@@ -1427,7 +1428,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       for (const P of [pv.A, pv.B]) {
         const p = line(P, pv.closed);
         ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 5 * px; ctx.stroke(p);
-        ctx.strokeStyle = theme.accent; ctx.lineWidth = (on ? 3 : 2.2) * px; ctx.stroke(p);
+        ctx.strokeStyle = RAIL; ctx.lineWidth = (on ? 3 : 2.2) * px; ctx.stroke(p);
       }
       if (pv.start) {
         for (const [seg, c] of [[pv.start, '#0f9d58'], [pv.end, '#d93025']]) {
@@ -1456,7 +1457,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       for (const rail of ['A', 'B']) col[rail].pts.forEach((q, pi) => {
         const act = a && a.kind === 'rp' && a.ci === ci && a.rail === rail && a.pi === pi;
         ctx.beginPath(); ctx.arc(q[0], q[1], (act ? 6 : 4.5) * px, 0, Math.PI * 2);
-        ctx.fillStyle = act ? theme.accent : '#fff'; ctx.fill(); ctx.strokeStyle = theme.accent; ctx.lineWidth = 1.8 * px; ctx.stroke();
+        ctx.fillStyle = act ? RAIL : '#fff'; ctx.fill(); ctx.strokeStyle = RAIL; ctx.lineWidth = 1.8 * px; ctx.stroke();
       });
     });
     // traced borders
@@ -1517,12 +1518,13 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         try { dense = Core.railDense({ pts, modes, closed: r.closed }, o.rings); } catch (e) { }
         const p = line(dense, r.closed);
         ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 5 * px; ctx.stroke(p);
-        ctx.strokeStyle = theme.accent; ctx.lineWidth = 2.6 * px; if (live) ctx.setLineDash([]); ctx.stroke(p);
+        const ink = d.border ? '#0b8f8f' : RAIL;
+        ctx.strokeStyle = ink; ctx.lineWidth = 2.6 * px; if (live) ctx.setLineDash([]); ctx.stroke(p);
         r.pts.forEach((q, i) => {
           const last = i === r.pts.length - 1 && i > 0;
           ctx.beginPath(); ctx.arc(q[0], q[1], (i === 0 || last ? 6.5 : 4.5) * px, 0, Math.PI * 2);
-          ctx.fillStyle = i === 0 ? '#0f9d58' : last ? '#d93025' : '#fff'; ctx.fill();
-          ctx.strokeStyle = i === 0 || last ? '#fff' : theme.accent; ctx.lineWidth = 1.6 * px; ctx.stroke();
+          ctx.fillStyle = i === 0 ? '#06612f' : last ? '#d93025' : '#fff'; ctx.fill();
+          ctx.strokeStyle = i === 0 || last ? '#fff' : ink; ctx.lineWidth = 1.6 * px; ctx.stroke();
         });
       }
       // a preview of the stitches once both rails have points
