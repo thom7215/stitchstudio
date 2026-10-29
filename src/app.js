@@ -1664,6 +1664,9 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     $('dbUndo').disabled = !cur.pts.length && d.stage === 'A';
     bar.querySelectorAll('[data-rm]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.rm === ui.railMode));
     $('dbTitle').textContent = d.border ? `Tracing a satin border · ${ui.borderW.toFixed(1)} mm wide` : `Drawing a satin column · rail ${d.stage === 'A' ? '1' : '2'} of 2`;
+    const o = colObj();
+    $('dbRungs').hidden = !!d.border;
+    $('dbRungs').disabled = !((o && o.columns && o.columns.length) || (d.stage === 'B' && d.B.pts.length >= 2));
     if (d.border) {
       $('dbFinish').textContent = '✓ Finish this border';
       $('dbStep').textContent = !cur.pts.length ? 'Click where the border should start. Shape edge mode follows the outline.' : 'Keep clicking along the part that should get a border. Click the last dot again (or Enter) to finish; click the first dot to go all the way round.';
@@ -3332,6 +3335,14 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   $('dbUndo').onclick = () => undoRailDot();
   $('dbCancel').onclick = () => { ui.colDraft = newColDraft(); syncDrawBar(); draw(); };
   $('dbDone').onclick = () => { keepDraft(); setTool(null); };
+  // finish whatever column is being drawn, then switch to dragging rungs across the columns
+  $('dbRungs').onclick = () => {
+    keepDraft();
+    const o = colObj();
+    if (!o || !o.columns || !o.columns.length) { toast('Draw a column first: one rail along each edge.'); return; }
+    setTool('rung');
+    toast('Drag a line across both rails to add a rung. Press Esc when done.', 4200);
+  };
   $('drawBar').querySelectorAll('[data-rm]').forEach((b) => b.onclick = () => { ui.railMode = b.dataset.rm; syncDrawBar(); draw(); });
   $('groupBtn').onclick = groupColors;
 
