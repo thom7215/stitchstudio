@@ -2082,7 +2082,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         let bi = -1, bd = Infinity;
         const near = (P, p) => { let m = Infinity; for (let k = 1; k < P.length; k++) m = Math.min(m, Core.segDist(p[0], p[1], P[k - 1][0], P[k - 1][1], P[k][0], P[k][1])); return m; };
         pvs.forEach((pv, ci) => { if (!pv) return; const d1 = Math.min(near(pv.A, a) + near(pv.B, b), near(pv.A, b) + near(pv.B, a)); if (d1 < bd) { bd = d1; bi = ci; } });
-        if (bi < 0) { toast('Draw a column first, then add rungs across it.'); draw(); return; }
+        if (bi < 0) { toast('Add rails for a column first, then add rungs across it.'); draw(); return; }
         co.columns[bi].rungs.push(snapRung(co, bi, { a, b }));
         ui.active = { kind: 'rungline', ci: bi, ri: co.columns[bi].rungs.length - 1 };
         touch(co); checkpoint(); changed();
@@ -2594,8 +2594,8 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     }
     return `<div class="guidebox">
       <div class="row">
-        <button type="button" class="small ${ui.tool === 'rail' ? 'toggle' : 'primary'}" aria-pressed="${ui.tool === 'rail'}" id="drawColBtn">✎ Draw a column</button>
-        <button type="button" class="small ${ui.tool === 'rung' ? 'toggle' : 'ghost'}" aria-pressed="${ui.tool === 'rung'}" id="rungBtn">⟋ Add rungs</button>
+        <button type="button" class="small ${ui.tool === 'rail' ? 'primary' : 'ghost'}" aria-pressed="${ui.tool === 'rail'}" id="drawColBtn">✎ Add Rails</button>
+        <button type="button" class="small ${ui.tool === 'rung' ? 'primary' : 'ghost'}" aria-pressed="${ui.tool === 'rung'}" id="rungBtn">⟋ Add rungs</button>
       </div>
       <p class="hint">${ui.tool === 'rung' ? 'Drag a line across both rails. The stitches near it run in that direction, and blend smoothly to the next rung. Press Esc when done.'
         : 'Each column has two <b>rails</b> (the outer edges of the stitches) and <b>rungs</b> (orange, the stitch direction). Stitching starts at the green end and stops at the red end.'}</p>
