@@ -2428,6 +2428,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         
         <div class="optrow"><span>On curves</span>${segHTML('curveMode', [['outer', 'Keep outside edge full'], ['center', 'Even in the middle']], P.curveMode || 'outer')}</div>
         <div class="optrow"><span>Short stitches</span><div class="angle"><span></span><input type="range" min="0" max="0.5" step="0.05" value="${sh}" data-param="shortAmt" aria-label="Short stitches on the inside of curves"><output>${sh === 0 ? 'Off' : Math.round(sh * 100) + '%'}</output></div></div>
+        <label class="check" title="Normally a satin stitch wider than 7.5 mm gets an extra needle point so it cannot snag. Tick this to sew each stitch all the way across."><input type="checkbox" data-param="keepWide" ${P.keepWide ? 'checked' : ''}> Keep wide stitches whole (don’t split over 7.5 mm)</label>
         `;
       if (o.kind === 'area') opts += `<div class="optrow"><span>Edge</span>${segHTML('border', [['none', 'None'], ['running', 'Outline'], ['satin', 'Satin border']], P.border)}</div>`;
       if (o.kind === 'area' && P.border === 'satin' && !multi) opts += edgeRunHTML('erBorderAll', P.edgeRun, true);

@@ -620,7 +620,7 @@ const Core = (() => {
     for (const { r, rev } of orderRegions(regs, back, pos)) {
       const rr = rev ? r.rows.slice().reverse() : r.rows;
       const rungs = rr.map((row) => [back(row.iv[0], row.y), back(row.iv[1], row.y)]);
-      const pts = satinFromRungs(rungs, { pull: p.pull, underlay: p.underlay !== 'none', heavy: p.underlay === 'heavy', rungStep: step });
+      const pts = satinFromRungs(rungs, { maxLen: p.maxLen, pull: p.pull, underlay: p.underlay !== 'none', heavy: p.underlay === 'heavy', rungStep: step });
       if (pts.length) { segs.push({ pts, phase: 'top' }); pos = pts[pts.length - 1]; }
     }
     return segs;
@@ -1068,7 +1068,7 @@ const Core = (() => {
         rungs.push([[g.q[0] + g.n[0] * a, g.q[1] + g.n[1] * a], [g.q[0] - g.n[0] * b, g.q[1] - g.n[1] * b]]);
       });
       if (rungs.length) columns.push({ rungs, closed: ch.closed && rungs.length === pts.length });
-      if (wmed > 9 && warn) warn('Some satin stitches are wider than 9 mm; they will be split. Fill may look better.');
+      if (wmed > 7.5 && !(p.maxLen > 100) && warn) warn('Satin stitches wider than 7.5 mm are split in two.');
     }
     // order columns
     const segs = [];
@@ -1084,7 +1084,7 @@ const Core = (() => {
       });
       const c = left.splice(bi, 1)[0];
       let rungs = rev ? c.rungs.slice().reverse().map(([a, b]) => [b, a]) : c.rungs;
-      const pts = satinFromRungs(rungs, { pull: p.pull, underlay: p.underlay !== 'none' && rungs.length > 6, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, closed: c.closed });
+      const pts = satinFromRungs(rungs, { maxLen: p.maxLen, pull: p.pull, underlay: p.underlay !== 'none' && rungs.length > 6, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, closed: c.closed });
       if (pts.length) { segs.push({ pts, phase: 'top', joinInside: true }); pos = pts[pts.length - 1]; }
     }
     return segs;
@@ -1330,7 +1330,7 @@ const Core = (() => {
       const r = guideRungs(ctx, g, D[gi], step);
       if (!r || r.rungs.length < 2) return;
       if (r.outside) outside = true;
-      const out = satinFromRungs(r.rungs, { pull: p.pull, underlay: p.underlay !== 'none' && r.rungs.length > 6, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, closed: r.closed, endForward: true });
+      const out = satinFromRungs(r.rungs, { maxLen: p.maxLen, pull: p.pull, underlay: p.underlay !== 'none' && r.rungs.length > 6, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, closed: r.closed, endForward: true });
       if (out.length) segs.push({ pts: out, phase: 'top', joinInside: true });
     });
     if (outside && warn) warn('Part of a satin path runs outside the shape.');
@@ -1608,7 +1608,8 @@ const Core = (() => {
       if (lay.rungs.some((r) => r.ignored)) ignored = true;
       const rungs = columnRungs(lay, step);
       if (rungs.length < 2) continue;
-      const out = satinFromRungs(rungs, { pull: p.pull, underlay: p.underlay !== 'none' && rungs.length > 6, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, closed: lay.closed, endForward: true });
+      if (!(p.maxLen > 100) && warn && rungs.some(([a, b]) => dist(a, b) > 7.5)) warn('Satin stitches wider than 7.5 mm are split in two.');
+      const out = satinFromRungs(rungs, { maxLen: p.maxLen, pull: p.pull, underlay: p.underlay !== 'none' && rungs.length > 6, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, closed: lay.closed, endForward: true });
       if (out.length) segs.push({ pts: out, phase: 'top', joinInside: true });
     }
     if (ignored && warn) warn('A rung crosses another rung or sits past the end of a rail, so it is ignored.');
@@ -1732,7 +1733,7 @@ const Core = (() => {
         const nx = -T[i][1], ny = T[i][0];
         return [[c[0] + nx * h, c[1] + ny * h], [c[0] - nx * h, c[1] - ny * h]];
       });
-      const pts = satinFromRungs(rungs, { pull: p.pull, underlay: p.underlay !== 'none' && width > 1.4, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, closed: q.closed });
+      const pts = satinFromRungs(rungs, { maxLen: p.maxLen, pull: p.pull, underlay: p.underlay !== 'none' && width > 1.4, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, closed: q.closed });
       // running stitch along an edge of the satin (patch style)
       const runs = [];
       if (er) {
@@ -1829,6 +1830,8 @@ const Core = (() => {
       underlay: o.params.underlay === false ? 'none' : fab.under,
       angle: o.params.angle ?? 45,
       stitchLen: 4.0,
+      // satin stitches longer than this get an extra needle point; 'keep wide stitches whole' turns that off
+      maxLen: o.params.keepWide ? 1e9 : 7.5,
       runLen: o.params.runLen || 2.5,
       triple: !!o.params.triple,
       margin: 0.3,
@@ -1864,7 +1867,7 @@ const Core = (() => {
       }
     } else {
       if (o.type === 'satin') {
-        if (o.width > 9) addWarn('This line is wider than 9 mm; satin stitches will be split.');
+        if (o.width > 7.5 && !o.params.keepWide) addWarn('Satin stitches wider than 7.5 mm are split in two.');
         segs = genStrokeSatin(o.paths, o.width, P, start, { edgeRun: o.params.edgeRun });
       } else if (o.type === 'running') segs = genRunning(o.paths, P, start);
     }
@@ -1882,11 +1885,12 @@ const Core = (() => {
     const colors = [];
     let cur = null, curColor = null, started = false;
     const push = (p, c, oi) => { X.push(p[0]); Y.push(p[1]); C.push(c); OBJ.push(oi); };
+    const keepWide = (oi) => { const o = objs[oi]; return !!(o && o.params && o.params.keepWide); };
     const stitchTo = (p, oi) => {
       if (cur) {
         const d = dist(cur, p);
         if (d < 0.12) return;
-        if (d > 7.5) { const n = Math.ceil(d / 7); for (let j = 1; j < n; j++) push(lerp(cur, p, j / n), 0, oi); }
+        if (d > 7.5 && !keepWide(oi)) { const n = Math.ceil(d / 7); for (let j = 1; j < n; j++) push(lerp(cur, p, j / n), 0, oi); }
       }
       push(p, 0, oi); cur = p;
     };
