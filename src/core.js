@@ -1333,7 +1333,7 @@ const Core = (() => {
       const out = satinFromRungs(r.rungs, { pull: p.pull, underlay: p.underlay !== 'none' && r.rungs.length > 6, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, closed: r.closed, endForward: true });
       if (out.length) segs.push({ pts: out, phase: 'top', joinInside: true });
     });
-    if (outside && warn) warn('Part of a satin path that follows the shape runs outside it. Drag its dots back inside, or switch that path to "My widths".');
+    if (outside && warn) warn('Part of a satin path runs outside the shape.');
     return segs;
   }
 
@@ -1611,7 +1611,7 @@ const Core = (() => {
       const out = satinFromRungs(rungs, { pull: p.pull, underlay: p.underlay !== 'none' && rungs.length > 6, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, closed: lay.closed, endForward: true });
       if (out.length) segs.push({ pts: out, phase: 'top', joinInside: true });
     }
-    if (ignored && warn) warn('A rung crosses another rung or sits past the end of a rail, so it is ignored (shown faded).');
+    if (ignored && warn) warn('A rung crosses another rung or sits past the end of a rail, so it is ignored.');
     return segs;
   }
   /* a traced satin border: a rail with a width, sitting inside, on, or outside the line */
@@ -1846,9 +1846,9 @@ const Core = (() => {
         else if (dir === 'columns' && o.columns && o.columns.length) segs = genColumns(o.rings, o.columns, P, addWarn);
         else if (dir === 'guides' && o.guides && o.guides.length) segs = genSatinGuides(o.rings, occ, o.guides, o.dirs || [], P, addWarn);
         else if (dir === 'columns') {
-          addWarn('No columns yet, so nothing is stitched on this shape. Click on one edge of the stroke to start your first rail.');
+          addWarn('No columns yet, so nothing is stitched on this shape.');
         } else {
-          if (dir === 'guides') addWarn('No satin paths drawn yet, so the automatic paths are used. Draw a path or start from the automatic ones.');
+          if (dir === 'guides') addWarn('No satin paths drawn yet, so the automatic paths are used.');
           segs = genSatinFollow(o.rings, occ, P, start, addWarn);
         }
       } else if (o.type === 'running') {

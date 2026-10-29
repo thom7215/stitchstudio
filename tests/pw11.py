@@ -17,7 +17,8 @@ async def main():
         await pg.click('#addTextBtn')
         await pg.wait_for_function("document.getElementById('busy').hidden", timeout=60000)
         await pg.click('#zoomFit'); await pg.wait_for_timeout(300)
-        await pg.click('#quickDraw'); await pg.wait_for_timeout(300)
+        await pg.click('#rightTabs [data-tab=stitch]'); await pg.click('#inspector [data-type=satin]'); await pg.wait_for_timeout(300)
+        if await pg.evaluate("window.__stitchStudio.ui.tool") != 'rail': await pg.click('#inspector [data-param=satinDir] [data-val=columns]'); await pg.wait_for_timeout(300)
         cvb = await pg.locator('#cv').bounding_box()
         bb = await pg.evaluate("(()=>{const o=window.__stitchStudio.S.objects[0];let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;for(const r of o.rings)for(const p of r){x0=Math.min(x0,p[0]);x1=Math.max(x1,p[0]);y0=Math.min(y0,p[1]);y1=Math.max(y1,p[1]);}return [x0,y0,x1,y1]})()")
         cx=(bb[0]+bb[2])/2

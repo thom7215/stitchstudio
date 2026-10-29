@@ -290,3 +290,5 @@ li.drop-after { box-shadow: inset 0 -3px 0 var(--accent); }
 .optrow.nolabel { grid-template-columns: 1fr; }
 .optrow.nolabel .seg { display: flex; width: 100%; }
 .optrow.nolabel .seg button { flex: 1; }
+/* no instruction text: the canvas bubble, step text, tips and hints are not shown */
+#bubble, #dbStep, #textHint, #hoopNote, #fabricTip { display: none !important; }

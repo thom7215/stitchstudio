@@ -465,7 +465,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
           const empty = members.filter((m) => !m.rings.length);
           if (empty.length) { S.objects = S.objects.filter((q) => !empty.includes(q)); empty.forEach((m) => ui.sel.delete(m.id)); if (empty.some((m) => m.id === ui.editingText)) { const k = members.find((m) => m.rings.length); ui.editingText = k ? k.id : null; } }
         } else {
-          if (members.some((m) => (m.columns && m.columns.length) || (m.guides && m.guides.length) || (m.borders && m.borders.length))) toast('The letters changed, so the hand-drawn columns and borders on them were cleared.', 4200);
+          if (members.some((m) => (m.columns && m.columns.length) || (m.guides && m.guides.length) || (m.borders && m.borders.length))) toast('Hand-drawn columns and borders on these letters were cleared.', 4200);
           const place = { cx: prev.cx, cy: prev.cy, rot: prev.rot || 0, flip: !!prev.flip };
           const group = ed.text.letter != null && ed.group ? ed.group : 'txt-' + Date.now().toString(36);
           const made = await makeLetters(t, place, recolor ? color : ed.color, group, ed.text.letter != null ? members : null);
@@ -489,7 +489,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         ui.sel = new Set(made.map((m) => m.id));
         ui.editingText = made[0].id;
         const types = new Set(made.map((m) => m.type));
-        toast(`Added ${made.length} letter${made.length > 1 ? 's' : ''} as ${types.size > 1 ? 'satin and fill' : made[0].type === 'satin' ? 'satin stitch' : made[0].type}. Click one letter to change just that letter; double-click to pick the whole word.`, 5200);
+        
       }
       checkpoint();
       changed();
@@ -593,7 +593,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const counts = {};
     created.forEach((o) => counts[o.type] = (counts[o.type] || 0) + 1);
     const parts = Object.entries(counts).map(([t, c]) => `${c} ${{ fill: 'fill', satin: 'satin', running: 'outline', skip: 'skipped' }[t]}`);
-    toast(`Imported ${created.length} shape${created.length > 1 ? 's' : ''}: ${parts.join(', ')}. Click any shape to change its stitch.`, 5200);
+    
     checkpoint();
     changed();
     fitView();
@@ -1184,13 +1184,13 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       ui.colDraft = { ...newColDraft(), border: true };
       touch(o); checkpoint(); changed();
       syncDrawBar();
-      toast(`Border ${o.borders.length} added. Trace another, or press Done.`, 3600);
+      
       return;
     }
     if (d.stage === 'A') {
       d.stage = 'B';
       syncDrawBar(); draw();
-      toast(cur.closed ? 'First rail is a loop. Draw the other edge as a loop too.' : 'First rail done. Now click along the other edge, from the same end.', 4200);
+      
       return;
     }
     o.columns = o.columns || [];
@@ -1200,7 +1200,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     ui.colDraft = newColDraft();
     touch(o); checkpoint(); changed();
     syncDrawBar();
-    toast(`Column ${o.columns.length} made. Add rungs to set the stitch direction, or draw the next column.`, 4800);
+    
   }
   // keep whatever has been drawn so far, even if the column is not finished
   function keepDraft() {
@@ -1217,7 +1217,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     o.type = 'satin'; o.auto = false; o.params.satinDir = 'columns';
     ui.colDraft = newColDraft();
     touch(o); checkpoint(); changed();
-    toast('Kept your unfinished column. Its dots can be moved now; click Continue in the column list to finish it.', 5200);
+    
   }
   function continueColumn(o, ci) {
     const col = o.columns[ci];
@@ -1237,8 +1237,8 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     if (!o) return;
     for (const q of sel) { q.type = 'satin'; q.auto = false; q.params.satinDir = 'columns'; q.columns = q.columns || []; touch(q); }
     checkpoint(); changed();
-    if (sel.length > 1) { toast('These are set to Manual. Click one of them on the hoop to draw its columns.', 4600); return; }
-    if (!o.columns.length) { setTool('rail'); toast('Starting clean. Click along one edge of the stroke to draw your first rail.', 4200); }
+    if (sel.length > 1) {  return; }
+    if (!o.columns.length) { setTool('rail');  }
   }
   function nodeHandleList(o, a) {
     // the two arrow handles of the selected rail dot (only for sides that lead to another dot)
@@ -1341,7 +1341,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         if (r.handles) r.handles.splice(a.pi, 1);
         r.modes.splice(Math.min(a.pi, r.modes.length - 1), 1);
         if (!r.closed) r.modes.length = r.pts.length - 1;
-      } else { o.borders.splice(a.ci, 1); if (a.kind === 'rp') toast('That border only had two dots left, so the border was removed. Ctrl+Z brings it back.', 3600); }
+      } else { o.borders.splice(a.ci, 1); if (a.kind === 'rp') toast('Border removed.'); }
       ui.active = null;
       touch(o); checkpoint(); changed();
       return true;
@@ -1356,7 +1356,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         o.columns.splice(a.ci, 1);
         ui.active = null;
         touch(o); checkpoint(); changed();
-        toast('That rail only had two dots left, so it was removed along with its column. Ctrl+Z brings it back.', 3600);
+        toast('Column removed.');
         return true;
       }
       r.pts.splice(a.pi, 1);
@@ -1377,7 +1377,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     // dots on a shape-edge segment sit on the edge
     if (r.modes[si] === 'edge') { const n = r.pts.length; for (const k of [si, (si + 1) % n]) r.pts[k] = placePoint(o, r.pts[k], 'edge'); }
     touch(o); checkpoint(); changed();
-    toast(`That part of the rail now follows: ${RAIL_LABEL[r.modes[si]]}.`);
+    
   }
   // the segment that "belongs" to a dot is the one arriving at it (the first dot uses the one leaving it)
   function clampSeg(r, pi) { return pi === 0 ? (r.closed ? r.modes.length - 1 : 0) : Math.min(pi - 1, r.modes.length - 1); }
@@ -1701,7 +1701,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     o.type = 'satin'; o.params.satinDir = 'guides'; o.auto = false;
     touch(o); checkpoint(); changed();
     syncDrawBar();
-    toast(`Path ${o.guides.length} added${closed ? ' as a loop' : ''}. Click to start another, or press Done.`, 4200);
+    
   }
   function deleteActive() {
     const o = guideObj(), a = ui.active;
@@ -2059,8 +2059,6 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         setBusy(true);
         scale(selected(), r.sx, r.sy, r.ax, r.ay).then(() => {
           checkpoint(); changed();
-          const bb = unionBBox(selected());
-          if (bb) toast(`Resized to ${bb.w.toFixed(1)} × ${bb.h.toFixed(1)} mm. Stitches were recalculated, so the density stays right.`);
         });
       } else draw();
       return;
@@ -2068,8 +2066,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     if (dragState.mode === 'colhandle') {
       const moved = dragState.moving, uns = dragState.unsnapped, conv = dragState.converted;
       dragState = null;
-      if (moved && conv) toast('That part of the rail is now a curve shaped by the handles.', 3600);
-      if (moved) { checkpoint(); changed(); if (uns) toast('The rail still follows the outline you traced; only the short piece next to this dot curves off to it. New dots mark where it leaves the edge, and you can move them too.', 5600); }
+      if (moved) { checkpoint(); changed(); }
       return;
     }
     if (dragState.mode === 'rungline') {
@@ -2082,7 +2079,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         let bi = -1, bd = Infinity;
         const near = (P, p) => { let m = Infinity; for (let k = 1; k < P.length; k++) m = Math.min(m, Core.segDist(p[0], p[1], P[k - 1][0], P[k - 1][1], P[k][0], P[k][1])); return m; };
         pvs.forEach((pv, ci) => { if (!pv) return; const d1 = Math.min(near(pv.A, a) + near(pv.B, b), near(pv.A, b) + near(pv.B, a)); if (d1 < bd) { bd = d1; bi = ci; } });
-        if (bi < 0) { toast('Add rails for a column first, then add rungs across it.'); draw(); return; }
+        if (bi < 0) { toast('Add rails first.'); draw(); return; }
         co.columns[bi].rungs.push(snapRung(co, bi, { a, b }));
         ui.active = { kind: 'rungline', ci: bi, ri: co.columns[bi].rungs.length - 1 };
         touch(co); checkpoint(); changed();
@@ -2105,7 +2102,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
           ang = ((ang % 180) + 180) % 180;
           go.params.angle = ang;
           touch(go); setTool(null); checkpoint(); changed();
-          toast(`Fill direction set to ${ang}°.`);
+          
         } else {
           go.dirs = go.dirs || [];
           go.dirs.push({ a, b });
@@ -2198,7 +2195,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const members = S.objects.filter((q) => q.group === g);
     ui.sel = new Set(members.map((q) => q.id));
     selectionChanged();
-    toast(members[0].text ? `Selected the whole word ${members[0].groupName} (${members.length} letters).` : `Selected all ${members.length} parts of “${members[0].groupName || 'the SVG'}”. Drag a corner handle to resize it.`);
+    
   }
   function selectionChanged() {
     const sel = selected();
@@ -2227,7 +2224,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         const co = colObj();
         ui.snap = co && ui.railMode === 'edge' && ui.cursor ? Core.snapToEdge(co.rings, ui.cursor, snapTol()) : null;
         syncDrawBar(); draw();
-        toast('Rail follows: ' + RAIL_LABEL[ui.railMode], 1600);
+        
       } else cycleSegMode(colObj(), ui.active, e.shiftKey ? -1 : 1);
       return;
     }
@@ -2281,7 +2278,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     checkpoint(); changed();
     if (toManual.length === 1 && sel.length === 1 && !toManual[0].columns.length) {
       setTool('rail');
-      toast('Manual satin: click along one edge of the stroke to draw the first rail. Pick Automatic above to let the app do it.', 5200);
+      
     }
   }
   function setParam(k, v, live) {
@@ -2295,7 +2292,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     ui.sel = new Set(); ui.editingText = null;
     syncTextUI();
     checkpoint(); changed();
-    toast(`Deleted ${n} shape${n > 1 ? 's' : ''}. Press Ctrl+Z to undo.`);
+    
   }
   function duplicateSelected() {
     // copies form their own word or SVG group, so editing a copy never touches the original
@@ -2323,7 +2320,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   function autoAll(list) {
     for (const o of list) autoPick(o);
     checkpoint(); changed();
-    toast(`Picked stitches for ${list.length} shape${list.length > 1 ? 's' : ''}.`);
+    
   }
   function groupColors() {
     // move each object earlier, next to the last object of the same colour, if it does not cross anything it overlaps
@@ -2377,13 +2374,12 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       const bb = unionBBox(S.objects);
       box.innerHTML = `<div class="rtab" data-rtab="stitch"><h2>Pick stitches</h2>
         <div class="empty-state">
-          <p>${S.objects.length ? 'Click any shape on the hoop to choose how it is stitched. Hold Shift to pick several.' : 'Add an SVG or some text to get started. Every shape gets a stitch type picked for it automatically.'}</p>
           ${S.objects.length ? `<button id="autoAllBtn" class="primary big">Auto-digitize everything</button>
-          <p class="hint">Narrow parts become satin, wide parts become fill, tiny details become outlines. You can change any of them after.</p>` : ''}
+          ` : ''}
         </div></div>
-        <div class="rtab" data-rtab="borders"><h2>Satin borders</h2><p class="hint">${S.objects.length ? 'Click a shape on the hoop, then trace the parts of its outline that should get a satin border.' : 'Add a shape first.'}</p></div>
+        <div class="rtab" data-rtab="borders"><h2>Satin borders</h2></div>
         <div class="rtab" data-rtab="arrange">${bb ? `<h2>Whole design size</h2>${sizeBoxHTML(bb)}
-        <div class="row"><button class="small ghost" id="fitHoopBtn">Fit to hoop</button><button class="small ghost" id="centerBtn">Centre in hoop</button></div>` : '<p class="hint">Nothing on the hoop yet.</p>'}</div>`;
+        <div class="row"><button class="small ghost" id="fitHoopBtn">Fit to hoop</button><button class="small ghost" id="centerBtn">Centre in hoop</button></div>` : ''}</div>`;
       applyTabs();
       const ab = $('autoAllBtn'); if (ab) ab.onclick = () => autoAll(S.objects);
       wireSizeBox(S.objects);
@@ -2402,8 +2398,8 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const warns = multi ? [] : (res ? res.warn : []);
     const rec = multi ? null : Core.analyze(o);
     const bb = unionBBox(sel);
-    const sizeWarn = !multi && o.type === 'satin' && o.kind === 'area' && rec && rec.type === 'fill' ? 'This shape is wide for satin. Long satin stitches can snag; fill is safer.' : null;
-    const fillWarn = !multi && o.type === 'fill' && rec && rec.type === 'satin' ? 'This shape is narrow. Satin usually looks better on narrow shapes.' : null;
+    const sizeWarn = !multi && o.type === 'satin' && o.kind === 'area' && rec && rec.type === 'fill' ? 'Wide for satin: long stitches can snag.' : null;
+    const fillWarn = !multi && o.type === 'fill' && rec && rec.type === 'satin' ? 'Narrow for fill: satin usually looks better.' : null;
     let opts = '';
     if (curType === 'fill') {
       opts += `<div class="optrow"><span>Direction</span><div class="angle">${angleDial(P.angle)}<input type="range" min="0" max="179" step="1" value="${P.angle}" data-param="angle" aria-label="Fill direction"><output>${P.angle}°</output></div></div>`;
@@ -2422,17 +2418,17 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         if (P.satinDir === 'columns' && !multi) opts += columnPanelHTML(o);
         if (P.satinDir === 'angle') opts += `<div class="optrow"><span>Angle</span><div class="angle">${angleDial(P.satinAngle)}<input type="range" min="0" max="179" step="1" value="${P.satinAngle}" data-param="satinAngle" aria-label="Satin angle"><output>${P.satinAngle}°</output></div></div>`;
       } else {
-        opts += `<p class="hint">Satin column ${o.width.toFixed(1)} mm wide, following the line.</p>`;
+        opts += ``;
         if (!multi) opts += edgeRunHTML('erLine', P.edgeRun, o.paths.every((q) => q.closed));
       }
       const dens = { light: 1.25, normal: 1, dense: 0.85 }[P.density || 'normal'];
       const sp = P.spacing != null ? P.spacing : +(fab().satin * dens).toFixed(2);
       const sh = P.shortAmt != null ? P.shortAmt : 0.3;
       opts += `<div class="optrow"><span>Spacing</span><div class="angle"><span class="sp-auto">${P.spacing != null ? '<button type="button" class="link" id="spAuto" title="Back to the fabric default">Auto</button>' : ''}</span><input type="range" min="0.25" max="0.8" step="0.01" value="${sp}" data-param="spacing" aria-label="Distance between stitches on the edge"><output>${sp.toFixed(2)} mm</output></div></div>
-        <p class="hint">Distance between stitch points along the edge. Smaller is denser.</p>
+        
         <div class="optrow"><span>On curves</span>${segHTML('curveMode', [['outer', 'Keep outside edge full'], ['center', 'Even in the middle']], P.curveMode || 'outer')}</div>
         <div class="optrow"><span>Short stitches</span><div class="angle"><span></span><input type="range" min="0" max="0.5" step="0.05" value="${sh}" data-param="shortAmt" aria-label="Short stitches on the inside of curves"><output>${sh === 0 ? 'Off' : Math.round(sh * 100) + '%'}</output></div></div>
-        <p class="hint">On the inside of a curve, every other stitch stops short so the thread does not pile up. Raise it if inside corners look bulky.</p>`;
+        `;
       if (o.kind === 'area') opts += `<div class="optrow"><span>Edge</span>${segHTML('border', [['none', 'None'], ['running', 'Outline'], ['satin', 'Satin border']], P.border)}</div>`;
       if (o.kind === 'area' && P.border === 'satin' && !multi) opts += edgeRunHTML('erBorderAll', P.edgeRun, true);
     } else if (curType === 'running') {
@@ -2445,7 +2441,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       more = `<details class="more"><summary>More settings</summary><div class="opts">
         <label class="check"><input type="checkbox" data-param="underlay" ${P.underlay !== false ? 'checked' : ''}> Underlay stitches (keeps the top layer smooth)</label>
         <div class="optrow"><span>Pull compensation</span><div class="angle"><span></span><input type="range" min="0" max="0.8" step="0.05" value="${pullV}" data-param="pull" aria-label="Pull compensation"><output>${pullV.toFixed(2)} mm</output></div></div>
-        <p class="hint">Pull compensation makes shapes slightly wider to make up for the fabric pulling in. Your fabric choice sets a good default.</p>
+        
       </div></details>`;
     }
     const isText = o.text && sel.every((q) => q.text && (q === o || (q.group && q.group === o.group)));
@@ -2461,23 +2457,22 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         const members = S.objects.filter((q) => q.group === g);
         if (members.length < 2) return '';
         if (o.text) {
-          if (members.every((q) => ui.sel.has(q.id))) return `<p class="hint">The whole word ${esc(o.groupName)} is selected. Click one letter on the hoop to change just that letter.</p>`;
-          return `<p class="hint">${multi ? `${sel.length} letters` : `The letter <b>${esc(o.name.split('  ·  ')[0])}</b>`} of ${esc(o.groupName)}. Settings here change only ${multi ? 'these letters' : 'this letter'}.</p><button type="button" class="small ghost" id="selGroup">Select the whole word (${members.length} letters)</button>`;
+          if (members.every((q) => ui.sel.has(q.id))) return ``;
+          return `<button type="button" class="small ghost" id="selGroup">Select the whole word (${members.length} letters)</button>`;
         }
-        if (members.every((q) => ui.sel.has(q.id))) return `<p class="hint">The whole SVG “${esc(o.groupName || 'SVG')}” is selected. Drag a handle on the hoop, or type a size below, to resize it.</p>`;
+        if (members.every((q) => ui.sel.has(q.id))) return ``;
         return `<button type="button" class="small" id="selGroup">Select the whole SVG (${members.length} parts) to resize it</button>`;
       })()}
       <div class="rtab" data-rtab="stitch">
       <h2 style="margin-top:6px">Stitch type</h2>
       <div class="types ${types.length === 3 ? 'three' : ''}">${types.map((t) => `<button type="button" data-type="${t}" aria-pressed="${curType === t}" title="${esc(TYPE_HELP[t])}">${ICONS[t]}${TYPE_LABEL[t]}<span class="kbd">${{ satin: 'S', fill: 'F', running: 'O', skip: 'X' }[t]}</span></button>`).join('')}</div>
-      ${curType ? `<p class="hint">${TYPE_HELP[curType]}</p>` : '<p class="hint">These shapes use different stitch types. Pick one to set them all.</p>'}
-      ${!multi && o.kind === 'area' && !(o.type === 'satin' && P.satinDir === 'columns') ? '<button type="button" class="small" id="quickDraw">✎ Manual: draw the satin columns yourself</button>' : ''}
-      ${!multi && rec ? `<div class="rec">${o.auto ? '<span class="auto">Auto</span>' : ''}<span>Suggested: <b>${TYPE_LABEL[rec.type]}</b>. ${esc(rec.why)}.</span>${o.type !== rec.type ? '<button class="link" id="useRec">Use suggestion</button>' : ''}</div>` : `<button class="small ghost" id="autoSelBtn">Let the app pick for these</button>`}
+      ${curType ? `` : ''}
+      ${!multi && rec ? (o.type !== rec.type ? `<div class="rec"><span>Suggested: <b>${TYPE_LABEL[rec.type]}</b></span><button class="link" id="useRec">Use suggestion</button></div>` : '') : `<button class="small ghost" id="autoSelBtn">Let the app pick for these</button>`}
       ${(warns.length || sizeWarn || fillWarn) ? `<div class="warns">${[sizeWarn, fillWarn, ...warns].filter(Boolean).map((w) => `<div class="warn">${esc(w)}</div>`).join('')}</div>` : ''}
       ${opts ? `<div class="opts">${opts}</div>` : ''}
       ${more}
       </div>
-      <div class="rtab" data-rtab="borders">${!multi && o.kind === 'area' ? borderPanelHTML(o) : `<h2>Satin borders</h2><p class="hint">${multi ? 'Select one shape at a time to trace its borders.' : 'Borders can be traced on filled shapes and letters. Lines from an SVG already are a satin or outline.'}</p>`}</div>
+      <div class="rtab" data-rtab="borders">${!multi && o.kind === 'area' ? borderPanelHTML(o) : `<h2>Satin borders</h2>`}</div>
       <div class="rtab" data-rtab="arrange">
       <h2 style="margin-top:6px">Size and position</h2>
       ${sizeBoxHTML(bb)}
@@ -2529,11 +2524,6 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     wireEdgeRun('erBorderAll', () => o.params.edgeRun, (v) => { o.params.edgeRun = v; }, o);
     wireRailPoint(o);
     const sg = $('selGroup'); if (sg) sg.onclick = () => selectGroup(o.group);
-    const qd = $('quickDraw');
-    if (qd) qd.onclick = () => {
-      o.type = 'satin'; o.auto = false; o.params.satinDir = 'columns'; o.columns = o.columns || [];
-      touch(o); checkpoint(); changed(); setTool('rail');
-    };
     const spa = $('spAuto'); if (spa) spa.onclick = () => setParam('spacing', null);
     const fd = $('fillDirBtn'); if (fd) fd.onclick = () => setTool(ui.tool === 'fillDir' ? null : 'fillDir');
     wireSizeBox(sel);
@@ -2570,7 +2560,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     if (!o.guides || !o.guides.length) {
       o.guides = Core.autoGuides(o.rings, occFor(o), { spacing: fab().satin, margin: 0.3 });
       o.dirs = o.dirs || [];
-      toast(o.guides.length ? `Started you with ${o.guides.length} path${o.guides.length > 1 ? 's' : ''} from the automatic satin. Drag the dots to change them, or draw your own.` : 'Draw a path along the middle of the stroke.', 5200);
+      
     }
     touch(o); checkpoint(); changed();
   }
@@ -2594,7 +2584,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
           <div class="row"><button type="button" class="small" data-ra="turn" data-v="-1.5" title="Turn more">↺↺</button><button type="button" class="small" data-ra="turn" data-v="-0.3">↺</button><button type="button" class="small" data-ra="square">Square it up</button><button type="button" class="small" data-ra="turn" data-v="0.3">↻</button><button type="button" class="small" data-ra="turn" data-v="1.5" title="Turn more">↻↻</button></div>
           <span class="lbl">Slide it along the column</span>
           <div class="row"><button type="button" class="small" data-ra="slide" data-v="-1.5">◀◀</button><button type="button" class="small" data-ra="slide" data-v="-0.3">◀ start</button><button type="button" class="small" data-ra="slide" data-v="0.3">end ▶</button><button type="button" class="small" data-ra="slide" data-v="1.5">▶▶</button></div>
-          <p class="hint">On the canvas: drag an orange square to move that end along its rail, or drag the middle of the rung to slide it. Keys: <kbd>↑</kbd><kbd>↓</kbd> turn, <kbd>←</kbd><kbd>→</kbd> slide (hold Shift for bigger steps).</p>
+          
           <div class="row"><button type="button" class="small ghost" id="ruDel">Remove this rung</button></div>
         </div>`;
       }
@@ -2604,15 +2594,14 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         <button type="button" class="small ${ui.tool === 'rail' ? 'primary' : 'ghost'}" aria-pressed="${ui.tool === 'rail'}" id="drawColBtn">✎ Add Rails</button>
         <button type="button" class="small ${ui.tool === 'rung' ? 'primary' : 'ghost'}" aria-pressed="${ui.tool === 'rung'}" id="rungBtn">⟋ Add rungs</button>
       </div>
-      <p class="hint">${ui.tool === 'rung' ? 'Drag a line across both rails. The stitches near it run in that direction, and blend smoothly to the next rung. Press Esc when done.'
-        : 'Each column has two <b>rails</b> (the outer edges of the stitches) and <b>rungs</b> (orange, the stitch direction). Stitching starts at the green end and stops at the red end.'}</p>
+      
       ${C.length ? `<ol class="guides cols">${C.map((col, i) => { const pv = pvs[i]; return `<li class="${a && a.ci === i ? 'on' : ''}" data-ci="${i}">
           <span class="grip" aria-hidden="true">⋮⋮</span><span class="gnum">${i + 1}</span><span class="gnm">Column ${i + 1}${col.A.closed && col.B.closed ? ' (loop)' : ''} <small>${pv ? railLen(pv.A).toFixed(0) + ' mm · ' + (col.rungs || []).length + ' rung' + ((col.rungs || []).length === 1 ? '' : 's') : 'unfinished: needs ' + (col.A.pts.length < 2 ? 'its first rail' : 'its second rail')}</small></span>
           <span class="gact">${pv ? '' : '<button type="button" class="tiny" data-c="cont" title="Keep drawing this column">Continue</button>'}<button type="button" class="tiny ghost" data-c="up" title="Sew earlier" ${i === 0 ? 'disabled' : ''}>↑</button><button type="button" class="tiny ghost" data-c="rev" title="Swap start and end">⇄</button><button type="button" class="tiny ghost" data-c="del" title="Delete column">✕</button></span></li>`; }).join('')}</ol>`
-        : '<p class="hint"><b>No columns yet.</b> Nothing is stitched on this shape until you draw one.</p>'}
+        : ''}
       ${a && C[a.ci] && (C[a.ci].rungs || []).length ? `<div class="row"><span class="lbl inline">Rungs in column ${a.ci + 1}</span>${C[a.ci].rungs.map((_, ri) => `<button type="button" class="tiny ${(a.kind === 'ru' || a.kind === 'rungline') && a.ri === ri ? 'toggle' : 'ghost'}" aria-pressed="${(a.kind === 'ru' || a.kind === 'rungline') && a.ri === ri}" data-rsel="${ri}">${ri + 1}</button>`).join('')}</div>` : ''}
       ${info}
-      <details class="more"><summary>How to edit</summary><p class="hint">Drag a blue dot anywhere to move a rail; it only snaps to the outline if you drop it right on the edge (hold <kbd>Alt</kbd> to never snap). Double-click a rail to add a dot; right-click a dot or rung (or click it and press <kbd>Delete</kbd>) to remove it. Removing a dot from a rail with only two dots removes that rail and its column. Click a dot and press <kbd>Tab</kbd> to switch that part of the rail between following the shape edge, a smooth curve and a straight line.</p></details>
+      
       <div class="row">
         <button type="button" class="small ghost" id="autoColsBtn">${C.length ? 'Replace with automatic columns' : 'Or let the app suggest columns'}</button>
         ${C.length ? '<button type="button" class="small ghost" id="clearCols">Remove all columns</button>' : ''}
@@ -2633,7 +2622,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       o.columns.splice(to, 0, m);
       ui.active = { kind: 'col', ci: to };
       touch(o); checkpoint(); changed();
-      toast(`Column moved: it now sews ${to === 0 ? 'first' : 'as number ' + (to + 1)}.`);
+      
     });
     document.querySelectorAll('.guides li[data-ci]').forEach((li) => {
       const ci = +li.dataset.ci;
@@ -2668,7 +2657,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
           <div class="row"><b>${esc(title)}</b></div>
           <span class="lbl">The line ${a.pi === 0 ? 'leaving' : 'arriving at'} this dot follows <kbd>Tab</kbd></span>
           <div class="seg wide" id="segMode">${RAIL_MODES.map((k) => `<button type="button" data-sm="${k}" aria-pressed="${k === m}">${RAIL_LABEL[k]}</button>`).join('')}</div>
-          <p class="hint">Drag a purple arrow to change the direction of its line. Each arrow only changes its own line: the one arriving at this dot or the one leaving it. Hold <kbd>Shift</kbd> while dragging if you want the other arrow to stay lined up.</p>
+          
           <div class="row" id="nodeType"><button type="button" class="small ghost" data-nt="smooth">Line up the arrows</button><button type="button" class="small ghost" id="rpReset" ${r.handles && r.handles[a.pi] ? '' : 'disabled'}>Reset arrows</button><button type="button" class="small ghost" id="rpDel">Remove this dot</button></div>
         </div>`;
   }
@@ -2709,7 +2698,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         <div class="optrow"><span>Placed</span><div class="seg" data-erk="mode"><button type="button" data-v="under" aria-pressed="${er.mode !== 'beside'}">Under the satin edge</button><button type="button" data-v="beside" aria-pressed="${er.mode === 'beside'}">Beside it, visible</button></div></div>
         <div class="optrow"><span>Edge</span><div class="seg" data-erk="side"><button type="button" data-v="inside" aria-pressed="${(er.side || 'inside') === 'inside'}">Inside</button><button type="button" data-v="outside" aria-pressed="${er.side === 'outside'}">Outside</button><button type="button" data-v="both" aria-pressed="${er.side === 'both'}">Both</button></div></div>
         <label class="check"><input type="checkbox" data-er="triple" ${er.triple ? 'checked' : ''}> Bold (triple stitch)</label>
-        <p class="hint">${er.mode === 'beside' ? 'Sewn after the satin, just next to its edge, as a visible line.' : 'Sewn before the satin, tucked just inside its edge. It tacks the fabric down and gives a crisp, even edge; the satin covers it.'}${closedHint ? '' : ' On an open line, "inside" is the side the line curves towards.'}</p>
+        
       </div>` : ''}
     </div>`;
   }
@@ -2750,8 +2739,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
           <button type="button" class="small ${ui.tool === 'border' ? 'toggle' : 'primary'}" aria-pressed="${ui.tool === 'border'}" id="traceBorderBtn">✎ Trace a border</button>
           <span class="angle" style="grid-template-columns:auto 1fr 52px;flex:1"><span class="lbl inline">New width</span><input type="range" id="bNewW" min="0.6" max="8" step="0.1" value="${ui.borderW.toFixed(1)}" aria-label="Width for new borders"><output>${ui.borderW.toFixed(1)} mm</output></span>
         </div>
-        <p class="hint">${ui.tool === 'border' ? 'Click along the part of the outline that should get a border. Shape edge mode follows the outline; <kbd>Tab</kbd> switches to a smooth curve or straight line. Click the last dot again to finish, or the first dot to go all the way round.'
-          : 'Trace only the parts you want edged. Each border is a satin column you can make wider or narrower. Borders sew after the shape.'}</p>
+        
         ${B.length ? `<ol class="guides bords">${B.map((b, i) => `<li class="${act === i ? 'on' : ''}" data-bi="${i}"><span class="grip" aria-hidden="true">⋮⋮</span><span class="gnum" style="background:#0b8f8f">${i + 1}</span><span class="gnm">Border ${i + 1}${b.R.closed ? ' (all round)' : ''} <small>${len(pvs[i] && pvs[i].mid).toFixed(0)} mm long · ${(b.width || 1.5).toFixed(1)} mm wide</small></span><span class="gact"><button type="button" class="tiny ghost" data-b="del" title="Delete border">✕</button></span></li>`).join('')}</ol>` : ''}
         ${edit}
       </div>`;
@@ -2816,8 +2804,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         ${g.w && !g.e ? `<div class="optrow"><span>Whole path</span><div class="angle"><span></span><input type="range" id="pwAll" min="0.5" max="10" step="0.1" value="${avg.toFixed(1)}" aria-label="Width of the whole path"><output>${avg.toFixed(1)} mm</output></div></div>` : ''}
         ${g.w && !g.e && pi != null && act.kind !== 'd' ? `<div class="optrow"><span>At dot ${pi + 1}</span><div class="angle"><span></span><input type="range" id="pwPoint" min="0.3" max="10" step="0.1" value="${g.w[pi].toFixed(1)}" aria-label="Width at this dot"><output>${g.w[pi].toFixed(1)} mm</output></div></div>` : ''}
         <div class="optrow"><span>Wider / narrower</span><div class="angle"><span></span><input type="range" id="pwWiden" min="-1.5" max="2" step="0.1" value="${(g.widen || 0).toFixed(1)}" aria-label="Make the path wider or narrower"><output>${(g.widen || 0) > 0 ? '+' : ''}${(g.widen || 0).toFixed(1)} mm</output></div></div>
-        <p class="hint">${g.e ? 'Each diamond is placed by you. Drag one to move that edge; the stitch at that dot runs between its two diamonds. Hold <b>Shift</b> while dragging to change the width evenly on both sides. Direction lines are ignored on this path.'
-          : 'Drag a diamond to move that edge on its own (this switches to Free edges). Hold <b>Shift</b> while dragging to change the width evenly on both sides.'}</p>
+        
         <div class="row"><button type="button" class="small ghost" id="pwRev">⇄ Swap start and end</button><button type="button" class="small ghost" id="pwDel">Delete path</button></div>
       </div>`;
     }
@@ -2826,13 +2813,12 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         <button type="button" class="small ${ui.tool === 'draw' ? 'toggle' : 'primary'}" aria-pressed="${ui.tool === 'draw'}" id="drawGuideBtn">✎ Draw a new path</button>
         <button type="button" class="small ${ui.tool === 'dir' ? 'toggle' : 'ghost'}" aria-pressed="${ui.tool === 'dir'}" id="dirBtn">⟋ Direction lines</button>
       </div>
-      <p class="hint">${ui.tool === 'dir' ? 'Drag short lines across the stroke. Stitches take that slant there and blend smoothly between lines. Press Esc when done.'
-        : 'Stitches start exactly at the green dot and stop exactly at the red one. The shaded band is the satin you will get.'}</p>
+      
       ${G.length ? `<ol class="guides">${G.map((gg, i) => `<li class="${g && act.gi === i ? 'on' : ''}" data-gi="${i}">
           <span class="gnum">${i + 1}</span><span class="gnm">Path ${i + 1}${gg.closed ? ' (loop)' : ''} <small>${guideLen(gg).toFixed(1)} mm long · ${widthSummary(gg)}</small></span>
           <span class="gact"><button type="button" class="tiny ghost" data-g="up" title="Sew earlier" ${i === 0 ? 'disabled' : ''}>↑</button><button type="button" class="tiny ghost" data-g="rev" title="Swap start and end">⇄</button><button type="button" class="tiny ghost" data-g="del" title="Delete path">✕</button></span></li>`).join('')}</ol>`
-        : '<p class="hint"><b>No paths yet.</b> Until you draw one, the automatic satin is used.</p>'}
-      ${edit || (G.length ? '<p class="hint">Click a path on the canvas, or a row above, to change its width.</p>' : '')}
+        : ''}
+      ${edit || (G.length ? '' : '')}
       ${D.length ? `<div class="row"><span class="hint">${D.length} direction line${D.length > 1 ? 's' : ''}</span><button type="button" class="link" id="clearDirs">Remove them</button></div>` : ''}
       <div class="row">
         <button type="button" class="small ghost" id="autoGuidesBtn">${G.length ? 'Reset to automatic paths' : 'Start from automatic paths'}</button>
@@ -2898,7 +2884,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       <span>mm</span></div>
       <div class="row"><span class="lbl inline">Scale by</span><input type="number" id="szPct" min="5" max="1000" step="5" value="100" style="width:76px" aria-label="Scale percent"><span>%</span>
         <button type="button" class="tiny ghost" data-pct="50">50%</button><button type="button" class="tiny ghost" data-pct="90">90%</button><button type="button" class="tiny ghost" data-pct="110">110%</button><button type="button" class="tiny ghost" data-pct="200">200%</button></div>
-      <p class="hint">Or drag a handle on the hoop: corners resize around the centre and keep the proportions, sides stretch. Hold Shift on a corner to stretch freely.</p>`;
+      `;
   }
   function wireSizeBox(list) {
     const w = $('szW'), h = $('szH'), l = $('szLock');
@@ -2953,7 +2939,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       const [m] = S.objects.splice(from, 1);
       S.objects.splice(to, 0, m);
       checkpoint(); changed();
-      toast(`“${m.name || 'Shape'}” now sews ${to === 0 ? 'first' : to === S.objects.length - 1 ? 'last' : 'in position ' + (to + 1)}.`);
+      
     });
   }
 
@@ -3056,7 +3042,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       setBusy(true);
       await scale(S.objects, k, k, cx, cy); translate(S.objects, -cx, -cy);
       checkpoint(); changed(); fitView();
-      toast('Design shrunk to fit the hoop. Stitch density was recalculated, so it stays smooth.');
+      
     };
   }
   function updateSteps() {
@@ -3169,7 +3155,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     } else if (inClaude()) {
       ok = await saveFile(`${name}.zip`, Formats.zip([{ name: `${name}.${m.ext}`, data: buildFile(m.id, name) }]));
     } else ok = await saveFile(`${name}.${m.ext}`, buildFile(m.id, name));
-    if (ok) { ui.exported = true; updateSteps(); $('exportDlg').close(); toast('Saved. Copy the file to a USB stick or send it to your machine.'); }
+    if (ok) { ui.exported = true; updateSteps(); $('exportDlg').close(); toast('Saved.'); }
   };
   $('getAppBtn').onclick = () => saveFile('stitch-studio.html', new TextEncoder().encode(ORIGINAL_HTML));
   $('pngBtn').onclick = async () => {
@@ -3296,12 +3282,12 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     S.hoop = best.id;
     if (HOOP_BRANDS[br].export) { ui.machine = HOOP_BRANDS[br].export; try { localStorage.setItem('ss-machine', ui.machine); } catch (er) { } }
     syncSettingsUI(); checkpoint(); renderStats(); fitView(); saveSetup();
-    toast(`${HOOP_BRANDS[br].name} hoops loaded. Using the ${best.name.replace(/\s*\(.*/, '')} hoop.`);
+    
   };
   $('hoopTurn').onchange = (e) => { S.hoopTurn = e.target.checked; checkpoint(); renderStats(); fitView(); saveSetup(); };
   $('fabricSel').innerHTML = Object.entries(FABRICS).map(([k, f]) => `<option value="${k}">${f.name}</option>`).join('');
   $('hoopSel').onchange = (e) => { S.hoop = e.target.value; checkpoint(); renderStats(); fitView(); saveSetup(); };
-  $('fabricSel').onchange = (e) => { S.fabric = e.target.value; syncSettingsUI(); checkpoint(); changed(); saveSetup(); toast('Density, underlay and pull compensation updated for ' + fab().name.toLowerCase() + '.'); };
+  $('fabricSel').onchange = (e) => { S.fabric = e.target.value; syncSettingsUI(); checkpoint(); changed(); saveSetup();  };
   $('fabricColor').oninput = (e) => { S.fabricColor = e.target.value; draw(); };
   $('fabricColor').onchange = () => { checkpoint(); saveSetup(); };
   $('knockout').onchange = (e) => { S.knockout = e.target.checked; checkpoint(); changed(); };
@@ -3320,7 +3306,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     if (/\.(ttf|otf|woff2?)$/i.test(f.name)) addFontFile(f); else loadFile(f);
   });
   $('sampleBtn').onclick = loadSample;
-  $('clearBtn').onclick = () => { if (!S.objects.length) return; S.objects = []; ui.sel = new Set(); ui.editingText = null; selectionChanged(); syncTextUI(); checkpoint(); changed(); toast('Hoop cleared. Press Ctrl+Z to bring it back.'); };
+  $('clearBtn').onclick = () => { if (!S.objects.length) return; S.objects = []; ui.sel = new Set(); ui.editingText = null; selectionChanged(); syncTextUI(); checkpoint(); changed();  };
   $('fontList').onclick = (e) => {
     const b = e.target.closest('button[data-font]'); if (!b) return;
     ui.font = b.dataset.font;
@@ -3348,9 +3334,9 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   $('dbRungs').onclick = () => {
     keepDraft();
     const o = colObj();
-    if (!o || !o.columns || !o.columns.length) { toast('Draw a column first: one rail along each edge.'); return; }
+    if (!o || !o.columns || !o.columns.length) { toast('Draw a column first.'); return; }
     setTool('rung');
-    toast('Drag a line across both rails to add a rung. Press Esc when done.', 4200);
+    
   };
   $('drawBar').querySelectorAll('[data-rm]').forEach((b) => b.onclick = () => { ui.railMode = b.dataset.rm; syncDrawBar(); draw(); });
   $('groupBtn').onclick = groupColors;

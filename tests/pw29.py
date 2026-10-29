@@ -10,7 +10,8 @@ async def main():
         await pg.evaluate("txtH.value=50; txtH.dispatchEvent(new Event('input'))")
         await pg.click('#addTextBtn'); await pg.wait_for_function("document.getElementById('busy').hidden", timeout=60000)
         await pg.click('#zoomFit'); await pg.wait_for_timeout(300)
-        await pg.click('#quickDraw'); await pg.wait_for_timeout(300)
+        await pg.click('#rightTabs [data-tab=stitch]'); await pg.click('#inspector [data-type=satin]'); await pg.wait_for_timeout(300)
+        if await pg.evaluate("window.__stitchStudio.ui.tool") != 'rail': await pg.click('#inspector [data-param=satinDir] [data-val=columns]'); await pg.wait_for_timeout(300)
         cvb = await pg.locator('#cv').bounding_box()
         async def scr(x,y):
             sx, sy = await pg.evaluate(f"window.__stitchStudio.toScreen({x},{y})"); return cvb['x']+sx, cvb['y']+sy

@@ -26,7 +26,8 @@ async def run(seed):
                     last[0]=f'select+manual {i}'
                     await pg.evaluate(f"(()=>{{window.__stitchStudio.ui.sel=new Set([{o['id']}]);}})()"); x,y = await scr(*q); await pg.mouse.click(x,y); await pg.wait_for_timeout(100)
                     await pg.click('#rightTabs [data-tab=stitch]')
-                    if await pg.locator('#quickDraw').count(): await pg.click('#quickDraw')
+                    await pg.click('#inspector [data-type=satin]', timeout=800); await pg.wait_for_timeout(200)
+                    if await pg.locator('#inspector [data-param=satinDir] [data-val=columns]').count(): await pg.click('#inspector [data-param=satinDir] [data-val=columns]', timeout=800)
                 elif r < 0.10:
                     last[0]=f'border tool {i}'
                     await pg.click('#rightTabs [data-tab=borders]')

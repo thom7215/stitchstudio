@@ -47,7 +47,6 @@
           <input type="file" id="fileIn" accept=".svg,image/svg+xml,.json,application/json">
           <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M12 16V4m0 0l-5 5m5-5l5 5M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <strong>Drop an SVG here</strong>
-          <span>or click to choose one. Every coloured shape becomes a stitch area.</span>
         </label>
         <div class="row">
           <button id="sampleBtn" class="small">Load sample patch</button>
@@ -155,7 +154,6 @@
       <section id="inspector"></section>
       <section data-rtab="order" id="orderSection">
         <h2>Sew order</h2>
-        <p class="hint">Top sews first. Drag to reorder.</p>
         <ol id="layers" class="layers"></ol>
         <button id="groupBtn" class="small ghost wide">Group same colours together</button>
       </section>
@@ -166,7 +164,6 @@
 <dialog id="saveDlg">
   <form method="dialog" id="saveForm">
     <h2>Save project</h2>
-    <p class="sub">Saves everything so you can keep working on it later: shapes, stitch settings, manual columns, borders, hoop and fabric.</p>
     <label for="saveName" class="lbl">Project name</label>
     <div class="row nowrap"><input id="saveName" type="text" autocomplete="off" spellcheck="false"><span class="ext">.json</span></div>
     <p class="hint" id="saveWhere"></p>
@@ -181,7 +178,6 @@
 <dialog id="exportDlg">
   <form method="dialog" id="exportForm">
     <h2>Export for your machine</h2>
-    <p class="sub">Pick your machine brand. The right file type is chosen for you.</p>
     <div class="machines" id="machines"></div>
     <label for="fileName" class="lbl">File name</label>
     <input id="fileName" type="text" value="my-design">
