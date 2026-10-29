@@ -2271,11 +2271,18 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   function setType(t) {
     const sel = selected();
     if (!sel.length) return;
+    // choosing Satin yourself starts on Manual (draw the rails); shapes picked by auto-digitize stay Automatic
+    const toManual = t === 'satin' ? sel.filter((o) => o.kind === 'area' && o.type !== 'satin') : [];
     for (const o of sel) {
       if (o.kind === 'line' && t === 'fill') continue;
       o.type = t; o.auto = false;
     }
+    for (const o of toManual) { o.params.satinDir = 'columns'; o.columns = o.columns || []; touch(o); }
     checkpoint(); changed();
+    if (toManual.length === 1 && sel.length === 1 && !toManual[0].columns.length) {
+      setTool('rail');
+      toast('Manual satin: click along one edge of the stroke to draw the first rail. Pick Automatic above to let the app do it.', 5200);
+    }
   }
   function setParam(k, v, live) {
     for (const o of selected()) o.params[k] = v;
@@ -2410,7 +2417,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         const dirOpts = [['follow', 'Automatic'], ['columns', 'Manual']];
         if (P.satinDir === 'guides') dirOpts.push(['guides', 'Old paths']);
         if (P.satinDir === 'angle') dirOpts.push(['angle', 'Old: one angle']);
-        opts += `<div class="optrow"><span>Direction</span>${segHTML('satinDir', dirOpts, P.satinDir)}</div>`;
+        opts += `<div class="optrow nolabel">${segHTML('satinDir', dirOpts, P.satinDir)}</div>`;
         if (P.satinDir === 'guides' && !multi) opts += guidePanelHTML(o);
         if (P.satinDir === 'columns' && !multi) opts += columnPanelHTML(o);
         if (P.satinDir === 'angle') opts += `<div class="optrow"><span>Angle</span><div class="angle">${angleDial(P.satinAngle)}<input type="range" min="0" max="179" step="1" value="${P.satinAngle}" data-param="satinAngle" aria-label="Satin angle"><output>${P.satinAngle}°</output></div></div>`;
