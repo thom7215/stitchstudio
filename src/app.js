@@ -735,7 +735,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   function draw() {
     if (drawQueued) return;
     drawQueued = true;
-    requestAnimationFrame(() => { drawQueued = false; paint(); });
+    requestAnimationFrame(() => { drawQueued = false; paint(); updateScrollbars(); });
   }
 
   /* ---------------- hoop geometry ---------------- */
@@ -2129,6 +2129,65 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   $('zoomIn').onclick = () => zoomAt(cw / 2, ch / 2, 1.3);
   $('zoomOut').onclick = () => zoomAt(cw / 2, ch / 2, 1 / 1.3);
   $('zoomFit').onclick = fitView;
+
+
+  /* ---------------- scrollbars ---------------- */
+  // the scrollable area is the hoop with its frame plus the design, with room to spare around it,
+  // and always includes what is on screen now
+  function scrollExtent() {
+    const G = hoopGeom(hoop());
+    let x0 = -G.ex, x1 = G.ex, y0 = -G.ey, y1 = G.ey + 20;
+    const bb = unionBBox(S.objects);
+    if (bb) { x0 = Math.min(x0, bb.x0); x1 = Math.max(x1, bb.x1); y0 = Math.min(y0, bb.y0); y1 = Math.max(y1, bb.y1); }
+    const mx = (x1 - x0) * 0.25 + 20, my = (y1 - y0) * 0.25 + 20;
+    x0 -= mx; x1 += mx; y0 -= my; y1 += my;
+    const v = viewRect();
+    return { x0: Math.min(x0, v.x0), x1: Math.max(x1, v.x1), y0: Math.min(y0, v.y0), y1: Math.max(y1, v.y1) };
+  }
+  const viewRect = () => ({ x0: -view.ox / view.s, x1: (cw - view.ox) / view.s, y0: -view.oy / view.s, y1: (ch - view.oy) / view.s });
+  let scrollDrag = null;
+  function updateScrollbars() {
+    if (!cw || !ch) return;
+    const E = scrollDrag ? scrollDrag.E : scrollExtent(), v = viewRect();
+    for (const [id, a0, a1, e0, e1] of [['hScroll', v.x0, v.x1, E.x0, E.x1], ['vScroll', v.y0, v.y1, E.y0, E.y1]]) {
+      const bar = $(id), th = bar.firstElementChild;
+      const span = e1 - e0, frac = (a1 - a0) / span;
+      bar.classList.toggle('off', frac >= 0.995);
+      const start = Math.max(0, (a0 - e0) / span), size = Math.min(1, frac);
+      if (id === 'hScroll') { th.style.left = (start * 100) + '%'; th.style.width = (size * 100) + '%'; }
+      else { th.style.top = (start * 100) + '%'; th.style.height = (size * 100) + '%'; }
+    }
+  }
+  function wireScrollbar(id, horiz) {
+    const bar = $(id), th = bar.firstElementChild;
+    const len = () => horiz ? bar.clientWidth : bar.clientHeight;
+    th.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      th.setPointerCapture(e.pointerId);
+      scrollDrag = { E: scrollExtent(), p: horiz ? e.clientX : e.clientY, o: horiz ? view.ox : view.oy };
+      bar.classList.add('drag');
+    });
+    th.addEventListener('pointermove', (e) => {
+      if (!scrollDrag) return;
+      const E = scrollDrag.E, span = horiz ? E.x1 - E.x0 : E.y1 - E.y0;
+      const d = ((horiz ? e.clientX : e.clientY) - scrollDrag.p) / len() * span * view.s; // in screen pixels of the canvas
+      if (horiz) view.ox = scrollDrag.o - d; else view.oy = scrollDrag.o - d;
+      draw();
+    });
+    const end = () => { if (!scrollDrag) return; scrollDrag = null; bar.classList.remove('drag'); draw(); };
+    th.addEventListener('pointerup', end); th.addEventListener('pointercancel', end);
+    // a click on the empty part of the bar moves one screen towards the click
+    bar.addEventListener('pointerdown', (e) => {
+      if (e.target !== bar) return;
+      e.preventDefault();
+      const r = th.getBoundingClientRect(), before = horiz ? e.clientX < r.left : e.clientY < r.top;
+      const page = (horiz ? cw : ch) * 0.85 * (before ? 1 : -1);
+      if (horiz) view.ox += page; else view.oy += page;
+      draw();
+    });
+  }
+  wireScrollbar('hScroll', true);
+  wireScrollbar('vScroll', false);
 
   function selectGroup(g) {
     const members = S.objects.filter((q) => q.group === g);
