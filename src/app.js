@@ -193,6 +193,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   };
   let results = [];      // per object
   let A = null;          // assembled stitches
+  let assembledVer = 0;  // bumps each time the stitches are rebuilt
   const cache = new Map();
 
   const hoop = () => {
@@ -679,6 +680,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     });
     for (const id of [...cache.keys()]) if (!live.has(id)) cache.delete(id);
     A = Core.assemble(S.objects, results);
+    assembledVer++;
     setBusy(false);
     renderStats();
     renderLayers();
@@ -817,6 +819,91 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const ey = hp.turned ? Math.max(exL, exR) : Math.max(exT, Y);
     return { field, opening, outer, seam, parts, notches, style, ow, oh, ex, ey };
   }
+
+  /* ---------------- realistic thread preview ---------------- */
+  // Each stitch is its own strand of thread: a dark edge that separates it from the stitch under it,
+  // the thread colour, and a soft sheen on the side facing the light. Both ends stop just short of the
+  // needle point, like real stitches sinking into the fabric. Drawn once into a layer the size of the
+  // screen and reused until the stitches, the view or the playback position change; during playback
+  // only the newly sewn stitches are added.
+  const threadLayer = { cv: document.createElement('canvas'), key: '', vkey: '', lim: 0, s: 1, ox: 0, oy: 0, t: null };
+  const threadInk = new Map();
+  function inks(col) {
+    let k = threadInk.get(col);
+    if (!k) {
+      const n = parseInt(col.slice(1), 16), r = n >> 16, g = n >> 8 & 255, b = n & 255;
+      const lum = (r * 0.3 + g * 0.59 + b * 0.11) / 255;
+      k = {
+        edge: shade(col, lum > 0.75 ? -0.38 : -0.55),
+        body: col,
+        shine: shade(col, lum > 0.8 ? 0.6 : 0.42),
+      };
+      threadInk.set(col, k);
+    }
+    return k;
+  }
+  function drawThreads(lim) {
+    const L = threadLayer, W = Math.round(cw * dpr), H = Math.round(ch * dpr);
+    const skey = [assembledVer, A.X.length, W, H].join('|');
+    const key = skey + '|' + [view.s.toFixed(4), view.ox.toFixed(2), view.oy.toFixed(2)].join('|');
+    // while panning or zooming, slide the picture already drawn and draw the detail again once the view settles
+    if (L.key && L.vkey === skey && L.key !== key && lim >= L.lim) {
+      const k = view.s / L.s;
+      ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(L.cv, dpr * (view.ox - k * L.ox), dpr * (view.oy - k * L.oy), W * k, H * k);
+      ctx.restore();
+      clearTimeout(L.t);
+      L.t = setTimeout(() => { L.key = ''; draw(); }, 140);
+      return;
+    }
+    if (L.cv.width !== W || L.cv.height !== H) { L.cv.width = W; L.cv.height = H; L.key = ''; }
+    const g = L.cv.getContext('2d');
+    let from = 1;
+    if (L.key !== key || lim < L.lim) { g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, W, H); L.key = key; L.vkey = skey; L.lim = 0; L.s = view.s; L.ox = view.ox; L.oy = view.oy; }
+    else from = Math.max(1, L.lim);
+    if (lim > L.lim) {
+      const s = view.s;
+      g.setTransform(dpr * s, 0, 0, dpr * s, dpr * view.ox, dpr * view.oy);
+      g.lineCap = 'round';
+      const X = A.X, Y = A.Y, C = A.C;
+      const w = 0.4; // thread width in mm
+      // how much detail shows: none when a thread is about a pixel wide, full from about 4 pixels
+      const px = w * s * dpr, detail = Math.max(0, Math.min(1, (px - 1.1) / 3));
+      const lx = -0.6, ly = -0.8; // light from the top left
+      // visible part of the hoop, so stitches off screen are skipped
+      const x0 = -view.ox / s - 2, x1 = (cw - view.ox) / s + 2, y0 = -view.oy / s - 2, y1 = (ch - view.oy) / s + 2;
+      let ci = 0;
+      for (let i = 1; i < from && i < C.length; i++) if (C[i] === 3) ci++;
+      for (let i = from; i < lim; i++) {
+        if (C[i] === 3) { ci++; continue; }
+        if (C[i] !== 0 || C[i - 1] === 3 || C[i - 1] === 2) continue;
+        const ax = X[i - 1], ay = Y[i - 1], bx = X[i], by = Y[i];
+        if ((ax < x0 && bx < x0) || (ax > x1 && bx > x1) || (ay < y0 && by < y0) || (ay > y1 && by > y1)) continue;
+        const dx = bx - ax, dy = by - ay, len = Math.hypot(dx, dy);
+        if (len < 0.05) continue;
+        const ux = dx / len, uy = dy / len;
+        const k = inks(A.colors[ci] || '#888888');
+        const e = Math.min(0.1, len * 0.18) * detail;
+        const sx = ax + ux * e, sy = ay + uy * e, ex = bx - ux * e, ey = by - uy * e;
+        if (detail > 0) {
+          g.globalAlpha = 0.35 + 0.65 * detail; g.strokeStyle = k.edge; g.lineWidth = w * (1 + 0.28 * detail);
+          g.beginPath(); g.moveTo(sx, sy); g.lineTo(ex, ey); g.stroke(); g.globalAlpha = 1;
+        }
+        g.strokeStyle = k.body; g.lineWidth = w;
+        g.beginPath(); g.moveTo(sx, sy); g.lineTo(ex, ey); g.stroke();
+        if (detail > 0.15 && len > w * 0.9) {
+          // sheen on the lit side of the strand
+          let nx = -uy, ny = ux; if (nx * lx + ny * ly < 0) { nx = -nx; ny = -ny; }
+          const o = w * 0.17, t = Math.min(len * 0.25, w * 0.5);
+          g.strokeStyle = k.shine; g.lineWidth = w * 0.3; g.globalAlpha = 0.65 * detail;
+          g.beginPath(); g.moveTo(sx + ux * t + nx * o, sy + uy * t + ny * o); g.lineTo(ex - ux * t + nx * o, ey - uy * t + ny * o); g.stroke();
+          g.globalAlpha = 1;
+        }
+      }
+      L.lim = lim;
+    }
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(L.cv, 0, 0); ctx.restore();
+  }
   let dragState = null;
   function paint() {
     const h = hoop();
@@ -908,9 +995,12 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     if (showSt && A && A.X.length) {
       const n = A.X.length;
       const lim = ui.sim >= 1 ? n : Math.max(1, Math.floor(ui.sim * n));
-      const fine = s >= 3.2;
-      const passes = fine ? [[-0.35, 0.40], [0, 0.30], [0.45, 0.09]] : [[0, Math.max(0.3, 1 / s)]];
       const X = A.X, Y = A.Y, C = A.C, O = A.OBJ;
+      // close up, every stitch is drawn as its own thread (see drawThreads); while dragging a selection,
+      // or zoomed far out, the quick drawing below is used
+      const fine = s >= 2.6 && !dragOff;
+      if (fine) drawThreads(lim);
+      const passes = fine ? [] : [[0, Math.max(0.3, 1 / s)]];
       for (const [amt, lw] of passes) {
         ctx.lineWidth = lw; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
         ctx.globalAlpha = amt > 0 ? 0.55 : 1;
