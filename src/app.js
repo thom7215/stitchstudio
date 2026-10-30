@@ -240,9 +240,13 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     syncSettingsUI();
     changed(false);
   }
-  function undo() { if (hist.i > 0) { hist.i--; restore(hist.stack[hist.i]); updateUndo(); } }
+  function undo() {
+    // while drawing rails or tracing a border, Undo takes back one dot at a time
+    if ((ui.tool === 'rail' || ui.tool === 'border') && undoDrawStep()) return;
+    if (hist.i > 0) { hist.i--; restore(hist.stack[hist.i]); updateUndo(); }
+  }
   function redo() { if (hist.i < hist.stack.length - 1) { hist.i++; restore(hist.stack[hist.i]); updateUndo(); } }
-  function updateUndo() { $('undoBtn').disabled = hist.i <= 0; $('redoBtn').disabled = hist.i >= hist.stack.length - 1; }
+  function updateUndo() { $('undoBtn').disabled = hist.i <= 0 && !canUndoDrawStep(); $('redoBtn').disabled = hist.i >= hist.stack.length - 1; }
 
   /* ---------------- objects ---------------- */
   function defaultParams() { return { angle: 45, density: 'normal', satinDir: 'follow', satinAngle: 0, underlay: true, pull: null, border: 'none', borderWidth: 1.5, triple: false, runLen: 2.5, spacing: null, curveMode: 'outer', shortAmt: 0.3 }; }
@@ -1253,12 +1257,45 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     if (mode === 'edge') { const q = Core.snapToEdge(o.rings, p, snapTol()); if (q) return q; }
     return p;
   }
+  // take back the last dot of a rail: closing a loop counts as a dot, so it is undone first
+  function popRailDot(r) {
+    if (r.closed) { r.closed = false; r.modes.length = Math.max(0, r.pts.length - 1); return; }
+    if (r.pts.length) { r.pts.pop(); r.modes.length = Math.max(0, r.pts.length - 1); }
+    if (r.handles) r.handles.length = Math.min(r.handles.length, r.pts.length);
+  }
   function undoRailDot() {
     const d = ui.colDraft; if (!d) return;
     const cur = d[d.stage];
-    if (cur.pts.length) { cur.pts.pop(); if (cur.modes.length >= cur.pts.length && cur.modes.length) cur.modes.pop(); }
-    else if (d.stage === 'B') { d.stage = 'A'; d.A.closed = false; }
+    if (cur.pts.length || cur.closed) popRailDot(cur);
+    else if (d.stage === 'B') { d.stage = 'A'; popRailDot(d.A); }
     syncDrawBar(); draw();
+  }
+  function canUndoDrawStep() {
+    if (ui.tool !== 'rail' && ui.tool !== 'border') return false;
+    const d = ui.colDraft, o = colObj();
+    if (d && (d.A.pts.length || d.B.pts.length)) return true;
+    return !!(o && (ui.tool === 'border' ? o.borders && o.borders.length : o.columns && o.columns.length));
+  }
+  // one step back while drawing: a dot of the rail being drawn, or else the last dot of the column
+  // (or border) finished just before, which opens it up again for drawing
+  function undoDrawStep() {
+    const d = ui.colDraft, o = colObj();
+    if (!o || !d) return false;
+    if (d.A.pts.length || d.B.pts.length) { undoRailDot(); updateUndo(); return true; }
+    if (ui.tool === 'border') {
+      if (!o.borders || !o.borders.length) return false;
+      const b = o.borders.pop();
+      ui.borderW = b.width || ui.borderW; ui.borderAlign = b.align || ui.borderAlign;
+      ui.colDraft = { ...newColDraft(), border: true, A: b.R };
+      popRailDot(b.R);
+    } else {
+      if (!o.columns || !o.columns.length) return false;
+      const col = o.columns.pop();
+      ui.colDraft = { stage: col.B.pts.length ? 'B' : 'A', A: col.A, B: col.B, rungs: col.rungs || [], at: o.columns.length };
+      undoRailDot();
+    }
+    touch(o); changed(); syncDrawBar(); updateUndo();
+    return true;
   }
   function finishRail(closeLoop) {
     const o = colObj(), d = ui.colDraft;
@@ -1745,6 +1782,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     return g;
   }
   function syncDrawBar() {
+    updateUndo();
     const bar = $('drawBar');
     const on = (ui.tool === 'rail' || ui.tool === 'border') && !!colObj();
     bar.hidden = !on;
@@ -1753,7 +1791,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const cur = d[d.stage];
     $('dbFinish').disabled = cur.pts.length < 2;
     $('dbFinish').textContent = d.stage === 'A' ? '✓ Finish first rail' : '✓ Finish second rail';
-    $('dbUndo').disabled = !cur.pts.length && d.stage === 'A';
+    $('dbUndo').disabled = !canUndoDrawStep();
     bar.querySelectorAll('[data-rm]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.rm === ui.railMode));
     $('dbTitle').textContent = d.border ? `Tracing a satin border · ${ui.borderW.toFixed(1)} mm wide` : `Drawing a satin column · rail ${d.stage === 'A' ? '1' : '2'} of 2`;
     const o = colObj();
@@ -3418,7 +3456,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   $('textNewBtn').onclick = () => { ui.editingText = null; ui.sel = new Set(); syncTextUI(); renderInspector(); renderLayers(); draw(); $('txt').focus(); $('txt').select(); };
   $('undoBtn').onclick = undo; $('redoBtn').onclick = redo;
   $('dbFinish').onclick = () => finishRail();
-  $('dbUndo').onclick = () => undoRailDot();
+  $('dbUndo').onclick = () => undoDrawStep();
   $('dbCancel').onclick = () => { ui.colDraft = newColDraft(); syncDrawBar(); draw(); };
   $('dbDone').onclick = () => { keepDraft(); setTool(null); };
   // finish whatever column is being drawn, then switch to dragging rungs across the columns
