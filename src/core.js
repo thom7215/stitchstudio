@@ -388,12 +388,23 @@ const Core = (() => {
     }
     // choose where stitches go. Rungs arrive finely spaced; place a stitch each time the
     // OUTER edge has moved exactly the target spacing, so curves stay full on the outside.
-    const mix = (i, j, t) => ({ ra: lerp(rungs[i][0], rungs[j][0], t), rb: lerp(rungs[i][1], rungs[j][1], t), a: lerp(R[i].a, R[j].a, t), b: lerp(R[i].b, R[j].b, t), m: lerp(R[i].m, R[j].m, t) });
+    const mix = (i, j, t) => ({ ra: lerp(rungs[i][0], rungs[j][0], t), rb: lerp(rungs[i][1], rungs[j][1], t), a: lerp(R[i].a, R[j].a, t), b: lerp(R[i].b, R[j].b, t), m: lerp(R[i].m, R[j].m, t),
+      cutA: !!(rungs[i].cutA || rungs[j].cutA), cutB: !!(rungs[i].cutB || rungs[j].cutB) });
+    // a side that was cut where this stroke meets another runs along that stroke's edge: it is not an
+    // outside edge, so it does not set the spacing
+    const sideStep = (r, l) => {
+      const da = dist(r.ra, l.ra), db = dist(r.rb, l.rb);
+      const ca = r.cutA || l.cutA, cb = r.cutB || l.cutB;
+      if (ca && !cb) return [db, db];
+      if (cb && !ca) return [da, da];
+      if (ca && cb) { const m = dist(r.m, l.m); return [m, m]; }
+      return [da, db];
+    };
     const K = [];
     if (o.target && R.length > 1) {
       let last = mix(0, 0, 0);
       K.push(last);
-      const meas = (r) => o.outerFull === false ? dist(r.m, last.m) : Math.max(dist(r.ra, last.ra), dist(r.rb, last.rb));
+      const meas = (r) => o.outerFull === false ? dist(r.m, last.m) : Math.max(...sideStep(r, last));
       for (let i = 1; i < R.length; i++) {
         let guard = 0;
         while (guard++ < 50) {
@@ -419,7 +430,7 @@ const Core = (() => {
     // how squeezed each side is at each stitch (1 = even, small = inside of a curve)
     // measured over several stitches so small wobbles on straight strokes don't count as curves
     const SA = [0], SB = [0];
-    for (let k = 1; k < K.length; k++) { SA.push(SA[k - 1] + dist(K[k].ra, K[k - 1].ra)); SB.push(SB[k - 1] + dist(K[k].rb, K[k - 1].rb)); }
+    for (let k = 1; k < K.length; k++) { const st = sideStep(K[k], K[k - 1]); SA.push(SA[k - 1] + st[0]); SB.push(SB[k - 1] + st[1]); }
     const squeeze = K.map((r, k) => {
       const w = 3, i0 = Math.max(0, k - w), i1 = Math.min(K.length - 1, k + w);
       const da = SA[i1] - SA[i0], db = SB[i1] - SB[i0];
@@ -864,22 +875,54 @@ const Core = (() => {
     const brs = G.branches.filter((b) => b.pts.length >= 2);
     // pair branches through junctions
     const link = brs.map(() => [null, null]);
-    const byNode = new Map();
+    // A crossing (an X) often thins into two junctions joined by a short link. Junctions joined by a link
+    // shorter than about the stroke width count as one crossing, so the arms that line up are paired across
+    // it, instead of each junction pairing on its own (which can bend a stroke into a V).
+    const isBridge = brs.map((b) => {
+      if (b.closed || b.a < 0 || b.b < 0 || b.a === b.b) return false;
+      if (G.nodes[b.a].deg < 3 || G.nodes[b.b].deg < 3) return false;
+      const R = idx.nearest(...toMM(b.pts[b.pts.length >> 1]));
+      return b.pts.length * r < 2.2 * R + 2 * r;
+    });
+    const grp = new Map();
+    const find = (n) => { while (grp.has(n) && grp.get(n) !== n) n = grp.get(n); return n; };
+    brs.forEach((b, bi) => { if (isBridge[bi]) { const x = find(b.a), y = find(b.b); if (!grp.has(x)) grp.set(x, x); grp.set(y, x); if (!grp.has(b.b)) grp.set(b.b, x); } });
+    const byGroup = new Map();
     brs.forEach((b, bi) => {
-      if (b.closed) return;
+      if (b.closed || isBridge[bi]) return;
       [[b.a, 0], [b.b, 1]].forEach(([nid, end]) => {
         if (nid < 0) return;
         const nd = G.nodes[nid];
         if (nd.deg < 3) return;
-        if (!byNode.has(nid)) byNode.set(nid, []);
+        const g = find(nid);
+        if (!byGroup.has(g)) byGroup.set(g, []);
         const pts = end === 0 ? b.pts : b.pts.slice().reverse();
         const k = Math.min(pts.length - 1, Math.max(3, Math.round(pts.length * 0.5)), 12);
         const p0 = toMM(pts[0]), p1 = toMM(pts[k]);
         const L = dist(p0, p1) || 1;
-        byNode.get(nid).push({ bi, end, d: [(p1[0] - p0[0]) / L, (p1[1] - p0[1]) / L] });
+        byGroup.get(g).push({ bi, end, nid, d: [(p1[0] - p0[0]) / L, (p1[1] - p0[1]) / L] });
       });
     });
-    for (const list of byNode.values()) {
+    // short links between two junctions of one crossing: [branch, end at the first node]
+    const bridgePath = (from, to) => {
+      const prev = new Map([[from, null]]), q = [from];
+      while (q.length) {
+        const n = q.shift();
+        if (n === to) break;
+        brs.forEach((b, bi) => {
+          if (!isBridge[bi]) return;
+          const m = b.a === n ? b.b : b.b === n ? b.a : null;
+          if (m == null || prev.has(m)) return;
+          prev.set(m, { bi, from: n }); q.push(m);
+        });
+      }
+      if (!prev.has(to)) return null;
+      const path = [];
+      for (let n = to; n !== from; n = prev.get(n).from) path.unshift(prev.get(n));
+      return path;
+    };
+    const usedBridge = new Set();
+    for (const list of byGroup.values()) {
       const pairs = [];
       for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
         if (list[i].bi === list[j].bi) continue;
@@ -890,9 +933,26 @@ const Core = (() => {
       const taken = new Set();
       for (const [, i, j] of pairs) {
         if (taken.has(i) || taken.has(j)) continue;
+        const A = list[i], B = list[j];
+        if (A.nid === B.nid) {
+          link[A.bi][A.end] = { bi: B.bi, end: B.end };
+          link[B.bi][B.end] = { bi: A.bi, end: A.end };
+        } else {
+          // through the short links between the two junctions, each link used by one stroke only
+          const path = bridgePath(A.nid, B.nid);
+          if (!path || path.some((st) => usedBridge.has(st.bi))) continue;
+          let cur = { bi: A.bi, end: A.end };
+          for (const st of path) {
+            usedBridge.add(st.bi);
+            const b = brs[st.bi], enter = b.a === st.from ? 0 : 1;
+            link[cur.bi][cur.end] = { bi: st.bi, end: enter };
+            link[st.bi][enter] = { bi: cur.bi, end: cur.end };
+            cur = { bi: st.bi, end: 1 - enter };
+          }
+          link[cur.bi][cur.end] = { bi: B.bi, end: B.end };
+          link[B.bi][B.end] = { bi: cur.bi, end: cur.end };
+        }
         taken.add(i); taken.add(j);
-        link[list[i].bi][list[i].end] = { bi: list[j].bi, end: list[j].end };
-        link[list[j].bi][list[j].end] = { bi: list[i].bi, end: list[i].end };
       }
     }
     const visited = new Uint8Array(brs.length);
@@ -961,6 +1021,11 @@ const Core = (() => {
   }
 
   function genSatinFollow(rings, occ, p, start, warn) {
+    const step = p.spacing / 2 / 4;
+    const columns = satinFollowColumns(rings, occ, p, warn);
+    return sewColumns(columns, p, start, step);
+  }
+  function satinFollowColumns(rings, occ, p, warn) {
     const { chains, idx, oidx, E } = skeletonChains(rings, occ, p);
     const step = p.spacing / 2 / 4;
     const inside = (q) => pointInRings(q[0], q[1], rings);
@@ -1070,6 +1135,112 @@ const Core = (() => {
       if (rungs.length) columns.push({ rungs, closed: ch.closed && rungs.length === pts.length });
       if (wmed > 7.5 && !(p.maxLen > 100) && warn) warn('Satin stitches wider than 7.5 mm are split in two.');
     }
+    return p.overlap === 'allow' ? columns : splitCrossings(columns);
+  }
+  /* Where automatic satin strokes cross or meet (an X, the stem of a T, the bar of an A), the longest
+     stroke runs straight through and the others stop at its edge, so the satin never lies in two layers.
+     Strokes keep a slight overlap where they meet, so no fabric shows between them. */
+  function splitCrossings(columns, keep = 0.3) {
+    const cols = columns.filter((c) => c.rungs.length >= 2);
+    if (cols.length < 2) return cols;
+    const mid = (r) => lerp(r[0], r[1], 0.5);
+    const lenOf = (c) => { let L = 0; for (let i = 1; i < c.rungs.length; i++) L += dist(mid(c.rungs[i - 1]), mid(c.rungs[i])); return L; };
+    // a grid of what is already covered
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const c of cols) for (const r of c.rungs) for (const q of r) { x0 = Math.min(x0, q[0]); y0 = Math.min(y0, q[1]); x1 = Math.max(x1, q[0]); y1 = Math.max(y1, q[1]); }
+    let res = 0.07;
+    while (((x1 - x0) / res + 4) * ((y1 - y0) / res + 4) > 4e6) res *= 1.3;
+    const W = Math.ceil((x1 - x0) / res) + 4, H = Math.ceil((y1 - y0) / res) + 4;
+    const ox = x0 - 2 * res, oy = y0 - 2 * res;
+    const cover = new Uint8Array(W * H);
+    const fillPoly = (P) => {
+      let ya = Infinity, yb = -Infinity;
+      for (const q of P) { ya = Math.min(ya, q[1]); yb = Math.max(yb, q[1]); }
+      const r0 = Math.max(0, Math.floor((ya - oy) / res)), r1 = Math.min(H - 1, Math.ceil((yb - oy) / res));
+      for (let row = r0; row <= r1; row++) {
+        const y = oy + (row + 0.5) * res, xs = [];
+        for (let i = 0; i < P.length; i++) {
+          const a = P[i], b = P[(i + 1) % P.length];
+          if ((a[1] > y) !== (b[1] > y)) xs.push(a[0] + (y - a[1]) * (b[0] - a[0]) / (b[1] - a[1]));
+        }
+        xs.sort((u, v) => u - v);
+        for (let k = 0; k + 1 < xs.length; k += 2) {
+          const c0 = Math.max(0, Math.ceil((xs[k] - ox) / res - 0.5)), c1 = Math.min(W - 1, Math.floor((xs[k + 1] - ox) / res - 0.5));
+          for (let cc = c0; cc <= c1; cc++) cover[row * W + cc] = 1;
+        }
+      }
+    };
+    const paint = (c) => {
+      for (let i = 1; i < c.rungs.length; i++) { const a = c.rungs[i - 1], b = c.rungs[i]; fillPoly([a[0], b[0], b[1], a[1]]); }
+      if (c.closed && c.rungs.length > 2) { const a = c.rungs[c.rungs.length - 1], b = c.rungs[0]; fillPoly([a[0], b[0], b[1], a[1]]); }
+    };
+    const at = (x, y) => { const cc = Math.floor((x - ox) / res), rr = Math.floor((y - oy) / res); return cc >= 0 && rr >= 0 && cc < W && rr < H && cover[rr * W + cc] === 1; };
+    // covered with room to spare: the strokes still overlap by about `keep` where they meet
+    const deep = (x, y) => at(x, y) && at(x + keep, y) && at(x - keep, y) && at(x, y + keep) && at(x, y - keep);
+    // the part of a rung that is not already covered (its longest uncovered stretch), as [t0, t1] along it
+    const clipT = (r) => {
+      const L = dist(r[0], r[1]), n = Math.max(2, Math.ceil(L / (res * 0.75)));
+      let best = null, run = -1;
+      for (let i = 0; i <= n + 1; i++) {
+        const free = i <= n && (() => { const q = lerp(r[0], r[1], i / n); return !deep(q[0], q[1]); })();
+        if (free && run < 0) run = i;
+        if (!free && run >= 0) { if (!best || i - 1 - run > best[1] - best[0]) best = [run, i - 1]; run = -1; }
+      }
+      if (!best) return null;
+      if (best[0] === 0 && best[1] === n) return [0, 1];
+      if ((best[1] - best[0]) / n < 0.25) return null;
+      return [best[0] / n, best[1] / n];
+    };
+    const clip = (r) => { const t = clipT(r); return !t ? null : t[0] === 0 && t[1] === 1 ? r : [lerp(r[0], r[1], t[0]), lerp(r[0], r[1], t[1])]; };
+    // cut ends follow the edge of the stroke they meet: smooth the trims along the piece so the edge
+    // is a clean line, not a staircase from the grid (a ragged edge also needs more stitches)
+    const smoothPiece = (P) => {
+      const n = P.length, k = 6;
+      const t0 = P.map((x) => x.t[0]), t1 = P.map((x) => x.t[1]);
+      const med = (arr, i) => { const w = []; for (let j = Math.max(0, i - k); j <= Math.min(n - 1, i + k); j++) w.push(arr[j]); w.sort((a, b) => a - b); return w[w.length >> 1]; };
+      const m0 = t0.map((_, i) => med(t0, i)), m1 = t1.map((_, i) => med(t1, i));
+      const avg = (arr, i) => { let sum = 0, c = 0; for (let j = Math.max(0, i - k); j <= Math.min(n - 1, i + k); j++) { sum += arr[j]; c++; } return sum / c; };
+      return P.map((x, i) => {
+        const a = x.t[0] === 0 ? 0 : avg(m0, i), b = x.t[1] === 1 ? 1 : avg(m1, i);
+        if (a === 0 && b === 1) return x.r;
+        const rr = [lerp(x.r[0], x.r[1], a), lerp(x.r[0], x.r[1], Math.max(a + 0.05, b))];
+        // which ends now lie along another stroke's edge (spacing ignores those sides)
+        rr.cutA = a > 0.001; rr.cutB = b < 0.999;
+        return rr;
+      });
+    };
+    const order = cols.map((c, i) => [lenOf(c), i]).sort((a, b) => b[0] - a[0]).map((x) => cols[x[1]]);
+    const out = [];
+    order.forEach((c, k) => {
+      if (k === 0) { out.push(c); paint(c); return; }
+      const pieces = [];
+      let cur = [];
+      const n = c.rungs.length;
+      // a closed loop is started where it is first uncovered, so a piece is not cut in two at the seam
+      let s0 = 0;
+      if (c.closed) { const firstCovered = c.rungs.findIndex((r) => clip(r) !== r); if (firstCovered >= 0) s0 = firstCovered; }
+      let cut = false;
+      for (let j = 0; j < n; j++) {
+        const r = c.rungs[(s0 + j) % n];
+        const t = clipT(r);
+        if (!t || t[0] !== 0 || t[1] !== 1) cut = true;
+        if (!t) { if (cur.length >= 2) pieces.push(cur); cur = []; continue; }
+        cur.push({ r, t });
+      }
+      if (cur.length >= 2) pieces.push(cur);
+      if (!cut) { out.push(c); paint(c); return; }
+      for (const raw of pieces) {
+        const pc = smoothPiece(raw);
+        // tiny leftovers just make knots
+        let L = 0; for (let i = 1; i < pc.length; i++) L += dist(mid(pc[i - 1]), mid(pc[i]));
+        if (L < 0.6) continue;
+        const piece = { rungs: pc, closed: false };
+        out.push(piece); paint(piece);
+      }
+    });
+    return out;
+  }
+  function sewColumns(columns, p, start, step) {
     // order columns
     const segs = [];
     let pos = start;
@@ -1083,7 +1254,7 @@ const Core = (() => {
         if (!c.closed && de < bd) { bd = de; bi = i; rev = true; }
       });
       const c = left.splice(bi, 1)[0];
-      let rungs = rev ? c.rungs.slice().reverse().map(([a, b]) => [b, a]) : c.rungs;
+      let rungs = rev ? c.rungs.slice().reverse().map((r) => { const q = [r[1], r[0]]; q.cutA = r.cutB; q.cutB = r.cutA; return q; }) : c.rungs;
       const pts = satinFromRungs(rungs, { maxLen: p.maxLen, pull: p.pull, underlay: p.underlay !== 'none' && rungs.length > 6, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, closed: c.closed });
       if (pts.length) { segs.push({ pts, phase: 'top', joinInside: true }); pos = pts[pts.length - 1]; }
     }
@@ -1832,6 +2003,7 @@ const Core = (() => {
       stitchLen: 4.0,
       // satin stitches longer than this get an extra needle point; 'keep wide stitches whole' turns that off
       maxLen: o.params.keepWide ? 1e9 : 7.5,
+      overlap: o.params.overlap, // 'allow' keeps the old behaviour (strokes may lie on top of each other); for testing
       runLen: o.params.runLen || 2.5,
       triple: !!o.params.triple,
       margin: 0.3,
@@ -2005,7 +2177,7 @@ const Core = (() => {
 
   return {
     clamp, dist, lerp, ringArea, ringsArea, perimeter, bbox, pointInRings, segDist, simplify,
-    analyze, generate, assemble, runPath, resample, edgeIndex, edgeList, catmull, autoGuides, guidePreview, measureWidths, captureEdges, ctrlFrames, railDense, snapToEdge, columnPreview, autoColumns, nearestOnRings, railSnap, railSlide, nodeHandles, borderPreview, edgePath,
+    analyze, generate, assemble, runPath, resample, edgeIndex, edgeList, catmull, autoGuides, guidePreview, measureWidths, captureEdges, ctrlFrames, railDense, snapToEdge, columnPreview, autoColumns, nearestOnRings, railSnap, railSlide, nodeHandles, borderPreview, edgePath, satinFollowColumns,
   };
 })();
 if (typeof module !== 'undefined') module.exports = Core;
