@@ -1526,10 +1526,18 @@ const Core = (() => {
     return best;
   }
   /* walk along the shape outline from p to q (the shorter way round) */
-  function edgePath(rings, p, q, tol = 2.5) {
+  function edgePath(rings, p, q, tol = 2.5, hop = 0) {
     const P = nearestOnRings(rings, p);
     if (!(P.d <= tol)) return [p, q];
-    const Q = nearestOnRings(rings, q, P.ri);
+    let Q = nearestOnRings(rings, q, P.ri);
+    // the far end is on another line (the inside of a letter, another stroke): jump straight across to the
+    // nearest point of that line, then follow it to the far end
+    const Qany = nearestOnRings(rings, q);
+    if (!hop && Qany.ri !== P.ri && Qany.d <= tol && Qany.d + 0.05 < Q.d) {
+      const J = nearestOnRings(rings, p, Qany.ri);
+      const along = edgePath(rings, J.pt, q, tol, 1);
+      return [p].concat(along);
+    }
     if (!(Q.d <= tol)) return [p, q];
     const r = rings[P.ri], n = r.length;
     const fwd = [P.pt], back = [P.pt];
