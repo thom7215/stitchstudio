@@ -3331,7 +3331,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   const objOpen = new Set();
   function renderObjects() {
     const ul = $('objList'); if (!ul) return;
-    const q = ($('objSearch').value || '').trim().toLowerCase();
+    const q = '';
     if (!S.objects.length) { ul.innerHTML = '<li class="empty">Nothing on the hoop yet.</li>'; return; }
     const match = (o) => !q || (o.name || '').toLowerCase().includes(q) || (o.groupName || '').toLowerCase().includes(q);
     const row = (o, member) => `<li data-id="${o.id}" role="treeitem" aria-selected="${ui.sel.has(o.id)}" class="${member ? 'member' : ''} ${ui.sel.has(o.id) ? 'sel' : ''} ${o.type === 'skip' ? 'skip' : ''}"><span></span><span class="dot" style="background:${o.color}"></span><span class="nm" title="${esc(o.name || 'Shape')}">${esc(o.name || 'Shape')}</span><span class="ty">${TYPE_LABEL[o.type] || ''}</span></li>`;
@@ -3899,7 +3899,6 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   /* ---------------- side panel tabs ---------------- */
   $('objAll').onclick = () => { ui.sel = new Set(S.objects.map((o) => o.id)); ui.keepTab = true; selectionChanged(); };
   $('objNone').onclick = () => { ui.sel = new Set(); ui.keepTab = true; selectionChanged(); };
-  $('objSearch').oninput = () => renderObjects();
   try { ui.ltab = localStorage.getItem('ss-ltab') || 'art'; ui.rtab = localStorage.getItem('ss-rtab') || 'stitch'; if (ui.rtab === 'arrange') ui.rtab = 'objects'; } catch (e) { ui.ltab = 'art'; ui.rtab = 'stitch'; }
   function applyTabs() {
     document.querySelectorAll('#leftTabs [data-tab]').forEach((b) => { const on = b.dataset.tab === ui.ltab; b.setAttribute('aria-selected', on); b.tabIndex = on ? 0 : -1; });
