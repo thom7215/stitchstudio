@@ -147,12 +147,29 @@
 
     <aside class="right panel">
       <nav class="tabs" id="rightTabs" role="tablist" aria-label="Selected shape">
+        <button type="button" role="tab" data-tab="objects">Objects<span class="badge" id="orderBadge"></span></button>
         <button type="button" role="tab" data-tab="stitch">Stitch</button>
         <button type="button" role="tab" data-tab="borders">Borders<span class="badge" id="bordersBadge"></span></button>
         <button type="button" role="tab" data-tab="arrange">Arrange</button>
-        <button type="button" role="tab" data-tab="order">Sew order<span class="badge" id="orderBadge"></span></button>
+        <button type="button" role="tab" data-tab="order">Sew order</button>
       </nav>
       <section id="inspector"></section>
+      <section data-rtab="objects" id="objSection">
+        <div class="row objtools">
+          <button type="button" class="small ghost" id="objAll">Select all</button>
+          <button type="button" class="small ghost" id="objNone">None</button>
+          <button type="button" class="small ghost" id="objInvert">Invert</button>
+        </div>
+        <div class="row objtools">
+          <span class="lbl inline">All</span>
+          <button type="button" class="tiny ghost" data-objtype="satin">Satin</button>
+          <button type="button" class="tiny ghost" data-objtype="fill">Fill</button>
+          <button type="button" class="tiny ghost" data-objtype="running">Outline</button>
+          <button type="button" class="tiny ghost" data-objtype="skip">Skip</button>
+        </div>
+        <input type="search" id="objSearch" placeholder="Find by name" autocomplete="off">
+        <ul id="objList" class="objlist" role="tree" aria-label="Objects"></ul>
+      </section>
       <section data-rtab="order" id="orderSection">
         <h2>Sew order</h2>
         <ol id="layers" class="layers"></ol>

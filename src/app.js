@@ -1137,7 +1137,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     }
     // selection
     for (const o of S.objects) {
-      const isSel = ui.sel.has(o.id), isHover = hoverId === o.id && !isSel;
+      const isSel = ui.sel.has(o.id), isHover = (hoverId === o.id || (hoverGroup && o.group === hoverGroup)) && !isSel;
       if (!isSel && !isHover) continue;
       ctx.save();
       if (dragOff && isSel) ctx.transform(dragOff.a, 0, 0, dragOff.d, dragOff.e, dragOff.f);
@@ -1960,7 +1960,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   const RESIZE_CURSOR = (h) => h.hx === 0 ? 'ns-resize' : h.hy === 0 ? 'ew-resize' : (h.hx === h.hy ? 'nwse-resize' : 'nesw-resize');
 
   /* ---------------- hit testing & pointer ---------------- */
-  let hoverId = null;
+  let hoverId = null, hoverGroup = null;
   function hit(wx, wy) {
     const tol = 5 / view.s;
     for (let i = S.objects.length - 1; i >= 0; i--) {
@@ -2600,6 +2600,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     ui.tool = null; ui.draft = []; ui.active = null; ui.colDraft = null; ui.snap = null;
     syncDrawBar();
     if (sel.length && ui.rtab === 'order' && !ui.keepTab) ui.rtab = 'stitch';
+    applyTabs();
     ui.keepTab = false;
     if (sel.length && sel.every((q) => q.text) && ui.ltab !== 'text') ui.ltab = 'text';
     if (sel.length && sel[0].text && sel.every((q) => q.text && (q === sel[0] || (q.group && q.group === sel[0].group)))) { ui.editingText = sel[0].id; writeTextForm(sel[0].text); $('txtColor').value = sel[0].color; }
@@ -3328,7 +3329,60 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
 
   /* ---------------- layers ---------------- */
   let dragLayer = null;
+  /* ---- Objects tab: everything on the hoop, words and SVGs as groups, for picking what to work on ---- */
+  const objOpen = new Set();
+  function renderObjects() {
+    const ul = $('objList'); if (!ul) return;
+    const q = ($('objSearch').value || '').trim().toLowerCase();
+    if (!S.objects.length) { ul.innerHTML = '<li class="empty">Nothing on the hoop yet.</li>'; return; }
+    const match = (o) => !q || (o.name || '').toLowerCase().includes(q) || (o.groupName || '').toLowerCase().includes(q);
+    const row = (o, member) => `<li data-id="${o.id}" role="treeitem" aria-selected="${ui.sel.has(o.id)}" class="${member ? 'member' : ''} ${ui.sel.has(o.id) ? 'sel' : ''} ${o.type === 'skip' ? 'skip' : ''}"><span></span><span class="dot" style="background:${o.color}"></span><span class="nm" title="${esc(o.name || 'Shape')}">${esc(o.name || 'Shape')}</span><span class="ty">${TYPE_LABEL[o.type] || ''}</span></li>`;
+    let html = '';
+    const done = new Set();
+    for (const o of S.objects) {
+      if (o.group) {
+        if (done.has(o.group)) continue;
+        done.add(o.group);
+        const mem = S.objects.filter((x) => x.group === o.group);
+        const shown = mem.filter(match);
+        if (!shown.length) continue;
+        const nSel = mem.filter((x) => ui.sel.has(x.id)).length;
+        const open = objOpen.has(o.group) || (q && shown.length < mem.length);
+        const types = [...new Set(mem.map((x) => TYPE_LABEL[x.type]))].join(', ');
+        html += `<li data-group="${esc(o.group)}" role="treeitem" aria-expanded="${open}" aria-selected="${nSel === mem.length}" class="group ${nSel === mem.length ? 'sel' : nSel ? 'part' : ''}"><button type="button" class="tw" data-tw="${esc(o.group)}" aria-label="${open ? 'Hide' : 'Show'} the parts">${open ? '▼' : '▶'}</button><span class="dot" style="background:${o.color}"></span><span class="nm" title="${esc(o.groupName || 'Group')}">${esc(o.groupName || 'Group')} <small>${mem.length} part${mem.length === 1 ? '' : 's'}</small></span><span class="ty">${esc(types)}</span></li>`;
+        if (open) html += shown.map((x) => row(x, true)).join('');
+      } else if (match(o)) html += row(o, false);
+    }
+    ul.innerHTML = html || '<li class="empty">Nothing matches.</li>';
+    const pick = (ids, e) => {
+      if (e.shiftKey || e.metaKey || e.ctrlKey) {
+        const allOn = ids.every((id) => ui.sel.has(id));
+        for (const id of ids) { if (allOn) ui.sel.delete(id); else ui.sel.add(id); }
+      } else {
+        // clicking what is already the whole selection clears it
+        const same = ids.length === ui.sel.size && ids.every((id) => ui.sel.has(id));
+        ui.sel = same ? new Set() : new Set(ids);
+      }
+      ui.keepTab = true; selectionChanged();
+    };
+    ul.querySelectorAll('li[data-id]').forEach((li) => {
+      const id = +li.dataset.id;
+      li.onclick = (e) => pick([id], e);
+      li.onmouseenter = () => { hoverId = id; hoverGroup = null; draw(); };
+      li.onmouseleave = () => { if (hoverId === id) { hoverId = null; draw(); } };
+    });
+    ul.querySelectorAll('li[data-group]').forEach((li) => {
+      const g = li.dataset.group;
+      li.onclick = (e) => {
+        if (e.target.closest('[data-tw]')) { if (objOpen.has(g)) objOpen.delete(g); else objOpen.add(g); renderObjects(); return; }
+        pick(S.objects.filter((x) => x.group === g).map((x) => x.id), e);
+      };
+      li.onmouseenter = () => { hoverGroup = g; hoverId = null; draw(); };
+      li.onmouseleave = () => { if (hoverGroup === g) { hoverGroup = null; draw(); } };
+    });
+  }
   function renderLayers() {
+    renderObjects();
     if (ui.reordering) return;
     if ($('orderBadge')) $('orderBadge').textContent = S.objects.length ? String(S.objects.length) : '';
     const ol = $('layers');
@@ -3845,12 +3899,18 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
 
   window.__stitchStudio = { view, S, ui, toScreen: (x, y) => [x * view.s + view.ox, y * view.s + view.oy], results: () => results, assembled: () => A };
   /* ---------------- side panel tabs ---------------- */
+  $('objAll').onclick = () => { ui.sel = new Set(S.objects.map((o) => o.id)); ui.keepTab = true; selectionChanged(); };
+  $('objNone').onclick = () => { ui.sel = new Set(); ui.keepTab = true; selectionChanged(); };
+  $('objInvert').onclick = () => { ui.sel = new Set(S.objects.filter((o) => !ui.sel.has(o.id)).map((o) => o.id)); ui.keepTab = true; selectionChanged(); };
+  document.querySelectorAll('[data-objtype]').forEach((b) => b.onclick = () => { ui.sel = new Set(S.objects.filter((o) => o.type === b.dataset.objtype).map((o) => o.id)); ui.keepTab = true; selectionChanged(); });
+  $('objSearch').oninput = () => renderObjects();
   try { ui.ltab = localStorage.getItem('ss-ltab') || 'art'; ui.rtab = localStorage.getItem('ss-rtab') || 'stitch'; } catch (e) { ui.ltab = 'art'; ui.rtab = 'stitch'; }
   function applyTabs() {
     document.querySelectorAll('#leftTabs [data-tab]').forEach((b) => { const on = b.dataset.tab === ui.ltab; b.setAttribute('aria-selected', on); b.tabIndex = on ? 0 : -1; });
     document.querySelectorAll('[data-ltab]').forEach((x) => { x.hidden = x.dataset.ltab !== ui.ltab; });
     document.querySelectorAll('#rightTabs [data-tab]').forEach((b) => { const on = b.dataset.tab === ui.rtab; b.setAttribute('aria-selected', on); b.tabIndex = on ? 0 : -1; });
-    $('inspector').hidden = ui.rtab === 'order';
+    $('inspector').hidden = ui.rtab === 'order' || ui.rtab === 'objects';
+    $('objSection').hidden = ui.rtab !== 'objects';
     document.querySelectorAll('#inspector .rtab').forEach((x) => { x.hidden = x.dataset.rtab !== ui.rtab; });
     $('orderSection').hidden = ui.rtab !== 'order';
     const one = selected().length === 1 ? selected()[0] : null;
