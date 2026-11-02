@@ -1560,7 +1560,9 @@ const Core = (() => {
       pts = smoothPoly(pts, ks, ch.closed, 2);
       out.push({ pts, closed: ch.closed, freeA: ch.freeA, freeB: ch.freeB });
     }
-    return { chains: out, idx, oidx, r, E };
+    // where strokes meet: each junction of the skeleton, with how far it is to the nearest edge
+    const junctions = G.nodes.filter((nd) => nd && nd.deg >= 3).map((nd) => { const q = toMM(nd.pix); return { q, R: idx.nearest(q[0], q[1]) }; });
+    return { chains: out, idx, oidx, r, E, junctions };
   }
 
   /* Round a tight bend the stitches on the inside of the turn would cross each other (a star of stitches
@@ -1596,11 +1598,17 @@ const Core = (() => {
     return sewColumns(columns, p, start, step);
   }
   function satinFollowColumns(rings, occ, p, warn) {
-    const { chains, idx, oidx, E } = skeletonChains(rings, occ, p);
+    const { chains, idx, oidx, E, junctions } = skeletonChains(rings, occ, p);
     const step = p.spacing / 2 / 4;
     const inside = (q) => pointInRings(q[0], q[1], rings);
     const columns = [];
+    // every stroke's centre line, sampled, with its half width: to tell whether a bulge at a junction lies
+    // over another stroke (trim it) or is part of this one, like the blob at the end of an s (keep it)
+    const centre = [];
+    chains.forEach((ch, ci) => { for (const q of resample(ch.pts, 0.3, ch.closed)) centre.push({ q, ci, hw: idx.nearest(q[0], q[1]) }); });
+    const overOther = (E, ci) => centre.some((c) => c.ci !== ci && dist(E, c.q) < c.hw * (testOpts.overK ?? 1.1));
     for (const ch of chains) {
+      const chi = chains.indexOf(ch);
       let pts = ch.pts;
       pts = resample(pts, step, ch.closed);
       if (pts.length < 2) continue;
@@ -1631,6 +1639,25 @@ const Core = (() => {
         const hwB = nB ? tipHW[tipHW.length - 1] : 0;
         for (let k = 0; k < nA; k++) { chordSet.add(k); tipLim.set(k, hwA); }
         for (let k = 0; k < nB; k++) { chordSet.add(pts.length - 1 - k); tipLim.set(pts.length - 1 - k, hwB); }
+      }
+      // through a junction the centre line sags toward the middle of the junction: run it straight across,
+      // from where it enters to where it leaves, so the stitches there keep the stroke's own direction
+      if (!testOpts.noBulgeCap && !testOpts.noStraight && junctions.length && !ch.closed) {
+        const zone = pts.map((q) => junctions.some((J) => dist(q, J.q) < 1.7 * J.R + 0.3));
+        for (let i = 0; i < pts.length; i++) {
+          if (!zone[i]) continue;
+          let j = i; while (j < pts.length && zone[j]) j++;
+          const a = i - 1, b = j; // the last point before and the first point after the junction
+          // only where the stroke carries on well past the junction on both sides (a crossing), not near an end
+          const span = j - i;
+          // and only a sag (the line dipping toward the junction), not a stroke that really bends there
+          if (a >= span * 0.4 && pts.length - 1 - b >= span * 0.4) {
+            const hwJ = Math.max(0.3, idx.nearest(pts[a][0], pts[a][1]), idx.nearest(pts[b][0], pts[b][1]));
+            let dev = 0; for (let k = i; k < j; k++) dev = Math.max(dev, segDist(pts[k][0], pts[k][1], pts[a][0], pts[a][1], pts[b][0], pts[b][1]));
+            if (dev < (testOpts.sagK ?? 0.5) * hwJ) for (let k = i; k < j; k++) pts[k] = lerp(pts[a], pts[b], (k - a) / (b - a));
+          }
+          i = j;
+        }
       }
       const T = tangents(pts, Math.max(2, Math.round(0.7 / step)), ch.closed);
       // where a rung line actually crosses the shape (used past the tips)
@@ -1701,21 +1728,49 @@ const Core = (() => {
         const lim = Math.max(1.35 * g.dt + 0.15, 0.6 * wmed), far = 3.2 * g.dt + 0.3;
         g.da = Math.min(g.da, g.outerA ? far : lim); g.db = Math.min(g.db, g.outerB ? far : lim);
       }
+      // where another stroke joins or crosses, the sides reach out into it and the satin would bulge over the
+      // other stroke. Through a junction each side keeps the stroke's own width: the width just before and just
+      // after the junction, blended across it, so the edge runs straight on
+      // the stroke at full width is kept too: a stroke cut short by the one it meets uses it, so the curved
+      // corners where the two meet stay covered
+      raw.forEach((g) => { if (g) { g.da0 = g.da; g.db0 = g.db; } });
+      if (!testOpts.noBulgeCap && junctions.length) {
+        const inJ = raw.map((g) => !!g && !g.tip && junctions.some((J) => dist(g.q, J.q) < 1.7 * J.R + 0.3));
+        for (const key of ['da', 'db']) {
+          const flag = key === 'da' ? 'outerA' : 'outerB';
+          const ok = (i) => raw[i] && !raw[i].tip && !raw[i][flag] && !inJ[i];
+          for (let i = 0; i < raw.length; i++) {
+            if (!inJ[i] || !raw[i] || raw[i][flag]) continue;
+            let j0 = i; while (j0 >= 0 && !ok(j0)) j0--;
+            let j1 = i; while (j1 < raw.length && !ok(j1)) j1++;
+            const L = j0 >= 0 ? raw[j0][key] : null, R = j1 < raw.length ? raw[j1][key] : null;
+            if (L == null && R == null) continue;
+            const v = L == null ? R : R == null ? L : L + (R - L) * (i - j0) / (j1 - j0), lim = v * 1.05 + 0.05;
+            if (raw[i][key] <= lim) continue;
+            const g = raw[i], sg = key === 'da' ? 1 : -1, d = raw[i][key] * 0.85;
+            if (overOther([g.q[0] + sg * g.n[0] * d, g.q[1] + sg * g.n[1] * d], chi)) raw[i][key] = lim;
+          }
+        }
+      }
       // median-smooth side distances
       const med = (arr, i, k) => { const s = []; for (let j = -k; j <= k; j++) { const v = arr[i + j]; if (v != null) s.push(v); } s.sort((a, b) => a - b); return s[Math.floor(s.length / 2)]; };
-      const A0 = raw.map((g) => g && g.da), B0 = raw.map((g) => g && g.db);
-      // median (removes spikes) then a gentle moving average (removes wobble) along the stroke
-      const A1 = raw.map((g, i) => g ? (g.tip || g.outerA ? g.da : med(A0, i, 8)) : null), B1 = raw.map((g, i) => g ? (g.tip || g.outerB ? g.db : med(B0, i, 8)) : null);
       const avg = (arr, i, k, key) => { let s = 0, c = 0; for (let j = -k; j <= k; j++) { const v = arr[i + j], g = raw[i + j]; if (v != null && !(g && (g.tip || g[key]))) { s += v; c++; } } return c ? s / c : arr[i]; };
-      const A = raw.map((g, i) => g ? (g.tip || g.outerA ? A1[i] : avg(A1, i, 6, 'outerA')) : null), B = raw.map((g, i) => g ? (g.tip || g.outerB ? B1[i] : avg(B1, i, 6, 'outerB')) : null);
-      let rungs = []; const first = columns.length;
+      const smoothSides = (ka, kb) => {
+        const A0 = raw.map((g) => g && g[ka]), B0 = raw.map((g) => g && g[kb]);
+        // median (removes spikes) then a gentle moving average (removes wobble) along the stroke
+        const A1 = raw.map((g, i) => g ? (g.tip || g.outerA ? g[ka] : med(A0, i, 8)) : null), B1 = raw.map((g, i) => g ? (g.tip || g.outerB ? g[kb] : med(B0, i, 8)) : null);
+        return [raw.map((g, i) => g ? (g.tip || g.outerA ? A1[i] : avg(A1, i, 6, 'outerA')) : null), raw.map((g, i) => g ? (g.tip || g.outerB ? B1[i] : avg(B1, i, 6, 'outerB')) : null)];
+      };
+      const [A, B] = smoothSides('da', 'db'), [AF, BF] = smoothSides('da0', 'db0');
+      let rungs = [], full = []; const first = columns.length;
+      const rungAt = (g, a, b) => [[g.q[0] + g.n[0] * a, g.q[1] + g.n[1] * a], [g.q[0] - g.n[0] * b, g.q[1] - g.n[1] * b]];
       raw.forEach((g, i) => {
-        if (!g) { if (rungs.length) { columns.push({ rungs: unfoldRungs(rungs), closed: false }); rungs = []; } return; }
+        if (!g) { if (rungs.length) { columns.push({ rungs: unfoldRungs(rungs), full: unfoldRungs(full), closed: false }); rungs = []; full = []; } return; }
         const a = A[i], b = B[i];
         if (a + b < 0.15) return;
-        rungs.push([[g.q[0] + g.n[0] * a, g.q[1] + g.n[1] * a], [g.q[0] - g.n[0] * b, g.q[1] - g.n[1] * b]]);
+        rungs.push(rungAt(g, a, b)); full.push(rungAt(g, Math.max(a, AF[i]), Math.max(b, BF[i])));
       });
-      if (rungs.length) columns.push({ rungs: unfoldRungs(rungs), closed: ch.closed && rungs.length === pts.length });
+      if (rungs.length) columns.push({ rungs: unfoldRungs(rungs), full: unfoldRungs(full), closed: ch.closed && rungs.length === pts.length });
       // whether the stroke's ends stick out free (not into another stroke)
       if (columns.length > first) { columns[first].freeA = !!ch.freeA; columns[columns.length - 1].freeB = !!ch.freeB; }
       if (wmed > 7.5 && !(p.maxLen > 100) && warn) warn('Satin stitches wider than 7.5 mm are split in two.');
@@ -1761,8 +1816,8 @@ const Core = (() => {
         }
         if (cutAt < 0 || (c.closed && cutAt >= n - 2)) { out.push(c); continue; }
         // the part before the crossing, then the rest (which may cross itself again)
-        out.push({ rungs: R.slice(0, cutAt), closed: false });
-        queue.unshift({ rungs: R.slice(cutAt), closed: false });
+        out.push({ rungs: R.slice(0, cutAt), full: c.full && c.full.slice(0, cutAt), closed: false });
+        queue.unshift({ rungs: R.slice(cutAt), full: c.full && c.full.slice(cutAt), closed: false });
       }
     }
     return out;
@@ -1850,8 +1905,9 @@ const Core = (() => {
     };
     const order = cols.map((c, i) => [lenOf(c) * barBoost(c), i]).sort((a, b) => b[0] - a[0]).map((x) => cols[x[1]]);
     const out = [];
-    order.forEach((c, k) => {
-      if (k === 0) { out.push(c); paint(c); return; }
+    order.forEach((c0, k) => {
+      const c = c0.full && c0.full.length === c0.rungs.length ? { ...c0, rungs: c0.full } : c0; // full width, for cutting
+      if (k === 0) { out.push(c0); paint(c0); return; }
       const pieces = [];
       let cur = [];
       const n = c.rungs.length;
@@ -1867,7 +1923,7 @@ const Core = (() => {
         cur.push({ r, t });
       }
       if (cur.length >= 2) pieces.push(cur);
-      if (!cut) { out.push(c); paint(c); return; }
+      if (!cut) { out.push(c0); paint(c0); return; } // runs through: keeps its straight edges
       for (const raw of pieces) {
         const pc = smoothPiece(raw);
         // tiny leftovers just make knots
