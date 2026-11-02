@@ -1825,79 +1825,83 @@ const Core = (() => {
       rungs: lay.rungs.map((r) => ({ a: pointAt(lay.A, lay.CA, r.sA, lay.closed), b: pointAt(lay.B, lay.CB, r.sB, lay.closed), ignored: !!r.ignored })),
     };
   }
-  /* Best sew order for columns: the order and direction (start/end) of each column that keeps the
-     moves between columns as short as possible; long moves cost extra because they need a trim.
-     Greedy starts from every column and end, then 2-opt and move-one passes. Returns [{ci, rev}]. */
-  function planColumnOrder(items) {
+  /* Best sew order for columns: the order of the columns, which end each one starts from and which rail it
+     starts on, chosen so the moves between columns (and from where the thread already is) are as short as
+     possible; long moves cost extra because they need a trim. Each column offers its variants with their real
+     first and last needle points. Greedy from every column and variant, then improvement passes. */
+  function planColumnOrder(items, start) {
     const n = items.length;
-    if (n < 2) return items.map((it) => ({ ci: it.ci, rev: false }));
-    const S = (k, r) => r ? items[k].e : items[k].s, E = (k, r) => r ? items[k].s : items[k].e;
+    if (!n) return [];
     const hop = (a, b) => { const d = dist(a, b); return d + (d > 2.5 ? 8 : 0); };
-    const cost = (seq) => { let c = 0; for (let i = 1; i < seq.length; i++) c += hop(E(seq[i - 1].k, seq[i - 1].r), S(seq[i].k, seq[i].r)); return c; };
-    const canRev = (k) => !items[k].closed;
+    const V = (q) => items[q.k].opts[q.o];
+    const cost = (seq) => {
+      let c = start ? hop(start, V(seq[0]).s) * 0.5 : 0;
+      for (let i = 1; i < seq.length; i++) c += hop(V(seq[i - 1]).e, V(seq[i]).s);
+      return c;
+    };
+    const twin = (k, o) => { const v = items[k].opts[o]; const j = items[k].opts.findIndex((w) => w.rev !== v.rev && w.swap === v.swap); return j < 0 ? o : j; };
     let best = null, bestC = Infinity;
-    for (let k0 = 0; k0 < n; k0++) for (const r0 of canRev(k0) ? [false, true] : [false]) {
-      const seq = [{ k: k0, r: r0 }], used = new Set([k0]);
+    for (let k0 = 0; k0 < n; k0++) for (let o0 = 0; o0 < items[k0].opts.length; o0++) {
+      const seq = [{ k: k0, o: o0 }], used = new Set([k0]);
       while (seq.length < n) {
-        const end = E(seq[seq.length - 1].k, seq[seq.length - 1].r);
-        let bk = -1, br = false, bd = Infinity;
+        const end = V(seq[seq.length - 1]).e;
+        let bk = -1, bo = 0, bd = Infinity;
         for (let k = 0; k < n; k++) {
           if (used.has(k)) continue;
-          for (const r of canRev(k) ? [false, true] : [false]) { const d = hop(end, S(k, r)); if (d < bd - 1e-9) { bd = d; bk = k; br = r; } }
+          items[k].opts.forEach((v, o) => { const d = hop(end, v.s); if (d < bd - 1e-9) { bd = d; bk = k; bo = o; } });
         }
-        seq.push({ k: bk, r: br }); used.add(bk);
+        seq.push({ k: bk, o: bo }); used.add(bk);
       }
-      // improve: reverse a run (flipping each column in it), or move one column elsewhere
       let c = cost(seq), better = true, guard = 0;
+      const take = (t) => { const tc = cost(t); if (tc < c - 1e-6) { seq.splice(0, n, ...t); c = tc; better = true; return true; } return false; };
       while (better && guard++ < 60) {
         better = false;
-        for (let i = 0; i < n - 1; i++) for (let j = i + 1; j < n; j++) {
-          const t = seq.slice(0, i).concat(seq.slice(i, j + 1).reverse().map((q) => ({ k: q.k, r: canRev(q.k) ? !q.r : q.r })), seq.slice(j + 1));
-          const tc = cost(t); if (tc < c - 1e-6) { seq.splice(0, n, ...t); c = tc; better = true; }
+        // another variant for one column
+        for (let i = 0; i < n; i++) for (let o = 0; o < items[seq[i].k].opts.length; o++) {
+          if (o === seq[i].o) continue;
+          const t = seq.slice(); t[i] = { k: seq[i].k, o }; take(t);
         }
+        // sew a run of columns the other way round
+        for (let i = 0; i < n - 1; i++) for (let j = i + 1; j < n; j++)
+          take(seq.slice(0, i).concat(seq.slice(i, j + 1).reverse().map((q) => ({ k: q.k, o: twin(q.k, q.o) })), seq.slice(j + 1)));
+        // move one column somewhere else
         for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
           if (i === j) continue;
           const rest = seq.slice(); const [m] = rest.splice(i, 1);
-          for (const r of canRev(m.k) ? [m.r, !m.r] : [m.r]) {
-            const t = rest.slice(); t.splice(j, 0, { k: m.k, r });
-            const tc = cost(t); if (tc < c - 1e-6) { seq.splice(0, n, ...t); c = tc; better = true; break; }
-          }
+          for (let o = 0; o < items[m.k].opts.length; o++) { const t = rest.slice(); t.splice(j, 0, { k: m.k, o }); if (take(t)) break; }
         }
       }
-      if (c < bestC - 1e-6) { bestC = c; best = seq.map((q) => ({ ci: items[q.k].ci, rev: q.r })); }
+      if (c < bestC - 1e-6) { bestC = c; best = seq.map((q) => ({ k: q.k, o: q.o })); }
     }
     return best;
   }
-  function columnSewOrder(rings, cols) {
+  const flipRung = (r) => { const q = [r[1], r[0]]; q.cutA = r.cutB; q.cutB = r.cutA; return q; };
+  function genColumns(rings, cols, p, warn, start) {
+    const step = p.spacing / 2 / 4;
+    let ignored = false, wide = false;
     const items = [];
     cols.forEach((col, ci) => {
       const lay = columnLayout(rings, col);
       if (!lay) return;
-      const rungs = columnRungs(lay, 0.1);
-      if (rungs.length < 2) return;
-      const mid = (r) => lerp(r[0], r[1], 0.5);
-      items.push({ ci, s: mid(rungs[0]), e: mid(rungs[rungs.length - 1]), closed: !!lay.closed });
-    });
-    return planColumnOrder(items);
-  }
-  function genColumns(rings, cols, p, warn) {
-    const step = p.spacing / 2 / 4;
-    const segs = [];
-    let ignored = false;
-    const plan = p.autoOrder ? columnSewOrder(rings, cols) : cols.map((_, ci) => ({ ci, rev: false }));
-    for (const { ci, rev } of plan) {
-      const col = cols[ci];
-      const lay = columnLayout(rings, col);
-      if (!lay) continue;
       if (lay.rungs.some((r) => r.ignored)) ignored = true;
-      let rungs = columnRungs(lay, step);
-      if (rungs.length < 2) continue;
-      if (rev) rungs = rungs.slice().reverse().map((r) => { const q = [r[1], r[0]]; q.cutA = r.cutB; q.cutB = r.cutA; return q; });
-      if (!(p.maxLen > 100) && warn && rungs.some(([a, b]) => dist(a, b) > 7.5)) warn('Satin stitches wider than 7.5 mm are split in two.');
-      const out = satinFromRungs(rungs, { maxLen: p.maxLen, pull: p.pull, underlay: p.underlay !== 'none' && rungs.length > 6, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, closed: lay.closed, endForward: true });
-      if (out.length) segs.push({ pts: out, phase: 'top', joinInside: true });
-    }
+      const base = columnRungs(lay, step);
+      if (base.length < 2) return;
+      if (base.some(([a, b]) => dist(a, b) > 7.5)) wide = true;
+      const opts = [];
+      const variants = p.autoOrder ? [[false, false], [false, true], ...(lay.closed ? [] : [[true, false], [true, true]])] : [[false, false]];
+      for (const [rev, swap] of variants) {
+        let rungs = rev ? base.slice().reverse() : base;
+        if (rev !== swap) rungs = rungs.map(flipRung);
+        const out = satinFromRungs(rungs, { maxLen: p.maxLen, pull: p.pull, underlay: p.underlay !== 'none' && rungs.length > 6, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, closed: lay.closed, endForward: true });
+        if (out.length) opts.push({ rev, swap, out, s: out[0], e: out[out.length - 1] });
+      }
+      if (opts.length) items.push({ ci, opts });
+    });
+    if (!(p.maxLen > 100) && warn && wide) warn('Satin stitches wider than 7.5 mm are split in two.');
     if (ignored && warn) warn('A rung crosses another rung or sits past the end of a rail, so it is ignored.');
+    const seq = p.autoOrder ? planColumnOrder(items, start) : items.map((_, k) => ({ k, o: 0 }));
+    const segs = seq.map((q) => ({ pts: items[q.k].opts[q.o].out, phase: 'top', joinInside: true }));
+    segs.plan = seq.map((q) => { const v = items[q.k].opts[q.o]; return { ci: items[q.k].ci, rev: v.rev, swap: v.swap }; });
     return segs;
   }
   /* a traced satin border: a rail with a width, sitting inside, on, or outside the line */
@@ -2123,7 +2127,7 @@ const Core = (() => {
       triple: !!o.params.triple,
       margin: 0.3,
     };
-    let segs = [];
+    let segs = [], colPlan = null;
     if (o.type === 'skip') {
       if (o.kind === 'area' && o.borders && o.borders.length) segs = genBorders(o.rings, o.borders, { ...P, spacing: fab.satin, underlay: 'light' }).filter((q) => q.pts.length >= 2);
       return { segs, warn };
@@ -2133,7 +2137,7 @@ const Core = (() => {
       else if (o.type === 'satin') {
         const dir = o.params.satinDir;
         if (dir === 'angle') segs = genSatinAngle(o.rings, occ, { ...P, angle: o.params.satinAngle ?? 0 }, start);
-        else if (dir === 'columns' && o.columns && o.columns.length) segs = genColumns(o.rings, o.columns, P, addWarn);
+        else if (dir === 'columns' && o.columns && o.columns.length) { segs = genColumns(o.rings, o.columns, P, addWarn, start); colPlan = segs.plan; }
         else if (dir === 'guides' && o.guides && o.guides.length) segs = genSatinGuides(o.rings, occ, o.guides, o.dirs || [], P, addWarn);
         else if (dir === 'columns') {
           addWarn('No columns yet, so nothing is stitched on this shape.');
@@ -2162,7 +2166,7 @@ const Core = (() => {
     const n = segs.reduce((s, q) => s + q.pts.length, 0);
     var occOut = occ;
     if (o.type !== 'skip' && n === 0 && !warn.length) addWarn('Nothing to stitch here (it may be hidden under other shapes).');
-    return { segs, warn, occ: occOut };
+    return colPlan ? { segs, warn, occ: occOut, plan: colPlan } : { segs, warn, occ: occOut };
   }
 
   /* ---------- assembly: objects -> stitch list ---------- */
@@ -2306,7 +2310,7 @@ const Core = (() => {
 
   return {
     clamp, dist, lerp, ringArea, ringsArea, perimeter, bbox, pointInRings, segDist, simplify,
-    analyze, generate, assemble, runPath, resample, edgeIndex, edgeList, catmull, autoGuides, guidePreview, measureWidths, captureEdges, ctrlFrames, railDense, snapToEdge, columnPreview, autoColumns, nearestOnRings, railSnap, railSlide, nodeHandles, borderPreview, edgePath, satinFollowColumns, pathOverlap, testOpts, columnSewOrder,
+    analyze, generate, assemble, runPath, resample, edgeIndex, edgeList, catmull, autoGuides, guidePreview, measureWidths, captureEdges, ctrlFrames, railDense, snapToEdge, columnPreview, autoColumns, nearestOnRings, railSnap, railSlide, nodeHandles, borderPreview, edgePath, satinFollowColumns, pathOverlap, testOpts,
   };
 })();
 if (typeof module !== 'undefined') module.exports = Core;

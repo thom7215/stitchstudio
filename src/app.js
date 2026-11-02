@@ -1651,6 +1651,12 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   }
   // the segment that "belongs" to a dot is the one arriving at it (the first dot uses the one leaving it)
   function clampSeg(r, pi) { return pi === 0 ? (r.closed ? r.modes.length - 1 : 0) : Math.min(pi - 1, r.modes.length - 1); }
+  // with "best sew order" on: the order, direction and starting rail the stitches were made with
+  function colPlan(o) {
+    if (!o || !(o.params || {}).autoOrder) return null;
+    const i = S.objects.indexOf(o), r = i >= 0 && results ? results[i] : null;
+    return r && r.plan ? r.plan : null;
+  }
   function reverseColumn(col) {
     for (const k of ['A', 'B']) {
       const r = col[k];
@@ -1668,7 +1674,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const RAIL = '#12a150'; // rails stand out in green against the blue selection and stitches
     ctx.save();
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    const pvs = colPreviews(o);
+    const pvs = colPreviews(o), plan = colPlan(o);
     const line = (P, closed) => { const p = new Path2D(); P.forEach((q, i) => i ? p.lineTo(q[0], q[1]) : p.moveTo(q[0], q[1])); if (closed) p.closePath(); return p; };
     const a = ui.active;
     (o.columns || []).forEach((col, ci) => {
@@ -1703,11 +1709,14 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         ctx.strokeStyle = RAIL; ctx.lineWidth = (on ? 3 : 2.2) * px; ctx.stroke(p);
       }
       if (pv.start) {
-        for (const [seg, c] of [[pv.start, '#0f9d58'], [pv.end, '#d93025']]) {
+        // best sew order may sew a column from its end: show where it really starts (green) and ends (red)
+        const pq = plan && plan.find((q) => q.ci === ci);
+        const sSeg = pq && pq.rev ? pv.end : pv.start, eSeg = pq && pq.rev ? pv.start : pv.end;
+        for (const [seg, c] of [[sSeg, '#0f9d58'], [eSeg, '#d93025']]) {
           ctx.strokeStyle = '#fff'; ctx.lineWidth = 6 * px; ctx.beginPath(); ctx.moveTo(seg[0][0], seg[0][1]); ctx.lineTo(seg[1][0], seg[1][1]); ctx.stroke();
           ctx.strokeStyle = c; ctx.lineWidth = 3.4 * px; ctx.stroke();
         }
-        const m = Core.lerp(pv.start[0], pv.start[1], 0.5);
+        const m = Core.lerp(sSeg[0], sSeg[1], 0.5);
         ctx.fillStyle = '#0f9d58'; ctx.beginPath(); ctx.arc(m[0], m[1], 7 * px, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = '#fff'; ctx.font = `700 ${9 * px}px Archivo, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(colNo(o, ci)), m[0], m[1] + 0.5 * px);
       }
@@ -2859,11 +2868,10 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const auto = !!(o.params || {}).autoOrder;
     // with "best sew order" on, the list shows the columns in the order they will be sewn
     let order = C.map((_, i) => ({ ci: i, rev: false }));
-    if (auto && C.length > 1) {
-      try {
-        const plan = Core.columnSewOrder(o.rings, C), seen = new Set(plan.map((q) => q.ci));
-        order = plan.concat(C.map((_, i) => ({ ci: i, rev: false })).filter((q) => !seen.has(q.ci)));
-      } catch (e) { console.error(e); }
+    const plan = auto ? colPlan(o) : null;
+    if (plan) {
+      const seen = new Set(plan.map((q) => q.ci));
+      order = plan.concat(C.map((_, i) => ({ ci: i, rev: false })).filter((q) => !seen.has(q.ci)));
     }
     const railLen = (P) => { let L = 0; for (let i = 1; i < P.length; i++) L += Core.dist(P[i - 1], P[i]); return L; };
     let info = '';
