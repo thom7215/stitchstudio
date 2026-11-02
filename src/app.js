@@ -3071,7 +3071,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   function wireSizeBox(list) {
     const w = $('szW'), h = $('szH'), l = $('szLock');
     if (!w) return;
-    l.onclick = () => { ui.lock = !ui.lock; l.setAttribute('aria-pressed', ui.lock); l.textContent = ui.lock ? '🔒' : '🔓'; };
+    l.onclick = () => { ui.lock = !ui.lock; syncLock(); };
     const apply = async (which) => {
       const bb = unionBBox(list);
       if (!bb) return;
@@ -3203,15 +3203,66 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     }
     return b.x0 >= -h.w / 2 && b.x1 <= h.w / 2 && b.y0 >= -h.h / 2 && b.y1 <= h.h / 2;
   }
-  function renderStats() {
+  /* the design's width and height, always editable in the bar under the hoop */
+  function designSizeBox() {
     const el = $('stats');
+    let box = $('dsize');
+    if (!box) {
+      el.innerHTML = `<span class="dsize" id="dsize"><span class="lbl inline">Size</span>
+        <input type="number" id="dsW" min="1" step="0.5" aria-label="Design width in mm" title="Design width (mm)">
+        <button type="button" class="tiny ghost lock" id="dsLock" title="Keep proportions"></button>
+        <input type="number" id="dsH" min="1" step="0.5" aria-label="Design height in mm" title="Design height (mm)">
+        <span>mm</span></span><span class="statsrest" id="statsRest"></span>`;
+      box = $('dsize');
+      const w = $('dsW'), h = $('dsH'), l = $('dsLock');
+      l.onclick = () => { ui.lock = !ui.lock; syncLock(); };
+      const apply = async (which) => {
+        const bb = unionBBox(S.objects);
+        if (!bb) return;
+        let sx = (+w.value || bb.w) / bb.w, sy = (+h.value || bb.h) / bb.h;
+        if (ui.lock) { if (which === 'w') sy = sx; else sx = sy; }
+        if (!isFinite(sx) || !isFinite(sy) || sx <= 0 || sy <= 0 || (Math.abs(sx - 1) < 1e-4 && Math.abs(sy - 1) < 1e-4)) { renderStats(); return; }
+        const tw = bb.w * sx, th = bb.h * sy;
+        setBusy(true);
+        await scale(S.objects, sx, sy, (bb.x0 + bb.x1) / 2, (bb.y0 + bb.y1) / 2);
+        // line widths and lettering scale evenly, so one more small step lands on the size typed
+        for (let k = 0; k < 2; k++) {
+          const b2 = unionBBox(S.objects);
+          const cx = tw / b2.w, cy = th / b2.h;
+          if (Math.abs(cx - 1) < 0.002 && Math.abs(cy - 1) < 0.002) break;
+          await scale(S.objects, cx, cy, (b2.x0 + b2.x1) / 2, (b2.y0 + b2.y1) / 2);
+        }
+        checkpoint(); changed();
+      };
+      w.onchange = () => apply('w');
+      h.onchange = () => apply('h');
+      // Enter applies straight away; Esc puts the current size back
+      for (const inp of [w, h]) inp.onkeydown = (e) => {
+        if (e.key === 'Enter') { inp.blur(); }
+        if (e.key === 'Escape') { renderStats(); inp.blur(); }
+      };
+    }
+    return box;
+  }
+  function syncLock() {
+    for (const id of ['dsLock', 'szLock']) { const l = $(id); if (l) { l.setAttribute('aria-pressed', ui.lock); l.textContent = ui.lock ? '🔒' : '🔓'; } }
+  }
+  function renderStats() {
+    const box = designSizeBox();
+    const rest = $('statsRest');
+    const bb = unionBBox(S.objects);
+    box.hidden = !bb;
+    if (bb) {
+      // do not overwrite a number while it is being typed
+      for (const [id, v] of [['dsW', bb.w], ['dsH', bb.h]]) { const inp = $(id); if (document.activeElement !== inp) inp.value = v.toFixed(1); }
+      syncLock();
+    }
     const b = designBounds();
-    if (!b) { el.innerHTML = '<span>No stitches yet</span>'; return; }
+    if (!b) { rest.innerHTML = '<span>No stitches yet</span>'; return; }
     const changes = A.colors.length - 1;
     const trims = A.C.filter((c) => c === 2).length;
     const mins = Math.round(A.stitches / 650 + changes * 0.5 + trims * 0.05);
-    el.innerHTML = `<span>Size <b>${b.w.toFixed(1)} × ${b.h.toFixed(1)} mm</b></span>
-      <span>Stitches <b>${A.stitches.toLocaleString()}</b></span>
+    rest.innerHTML = `<span>Stitches <b>${A.stitches.toLocaleString()}</b></span>
       <span>Colours <b>${A.colors.length}</b></span>
       <span>Trims <b>${trims}</b></span>
       <span>Sewing time <b>about ${Math.max(1, mins)} min</b></span>
@@ -3224,7 +3275,6 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       setBusy(true);
       await scale(S.objects, k, k, cx, cy); translate(S.objects, -cx, -cy);
       checkpoint(); changed(); fitView();
-      
     };
   }
   function updateSteps() {

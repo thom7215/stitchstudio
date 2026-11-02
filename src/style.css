@@ -292,3 +292,10 @@ li.drop-after { box-shadow: inset 0 -3px 0 var(--accent); }
 .optrow.nolabel .seg button { flex: 1; }
 /* no instruction text: the canvas bubble, step text, tips and hints are not shown */
 #bubble, #dbStep, #textHint, #hoopNote, #fabricTip { display: none !important; }
+
+/* design size in the bar under the hoop */
+.dsize { display: inline-flex; align-items: center; gap: 5px; }
+.dsize[hidden] { display: none; }
+.dsize input { width: 68px; padding: 3px 6px; font: 500 13px var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+.dsize .lock { padding: 2px 5px; font-size: 12px; }
+.statsrest { display: contents; }
