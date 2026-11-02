@@ -1548,7 +1548,7 @@ const Core = (() => {
     };
     // length of a path that runs along the lines (ignoring the bit right next to its two ends,
     // which may sit on a rail on purpose)
-    const overlap = (P, skip = 0.8) => {
+    const overlap = (P, skip = 0.8, ignore = null) => {
       if (!grid.size || P.length < 2) return 0;
       const s0 = P[0], s1 = P[P.length - 1];
       let len = 0;
@@ -1557,6 +1557,7 @@ const Core = (() => {
         for (let k = 0; k < n; k++) {
           const q = lerp(a, b, (k + 0.5) / n);
           if (dist(q, s0) < skip || dist(q, s1) < skip) continue;
+          if (ignore && ignore(q)) continue;
           if (near(q, 0.3)) len += L / n;
         }
       }
@@ -2107,6 +2108,7 @@ const Core = (() => {
 
   /* ---------- assembly: objects -> stitch list ---------- */
   // cmd: 0 stitch, 1 jump, 2 trim, 3 colour change
+  const testOpts = {}; // for tests: { oldTravel: true } brings back the old travel routing
   function assemble(objs, results) {
     const X = [], Y = [], C = [], OBJ = [];
     const colors = [];
@@ -2139,9 +2141,18 @@ const Core = (() => {
     };
     let stitches = 0;
     let lastObj = -1;
+    // everything sewn on top so far: travel runs must not lie on it (they would show)
+    const sewn = avoidIndex(0.8);
+    // travel that a shape sewn later will cover (curOcc) is hidden, so it may lie on earlier stitching
+    let curOcc = [];
+    const hidden = (q) => curOcc.some((R) => pointInRings(q[0], q[1], R));
+    const measure = (P) => { const L = pathLength(P, false); return L > 1e-6 ? sewn.overlap(P, 0.6, curOcc.length ? hidden : null) / L : 0; };
+    const overSewn = (P) => testOpts.oldTravel ? 0 : measure(P);
+    const travel = { mm: 0, overMm: 0 };
     objs.forEach((o, oi) => {
       const res = results[oi];
       if (!res || !res.segs.length) return;
+      curOcc = res.occ || [];
       const col = o.color;
       res.segs.forEach((s, si) => {
         const p0 = s.pts[0];
@@ -2152,15 +2163,17 @@ const Core = (() => {
           const d = dist(cur, p0);
           if (d <= 1.6) connect = true;
           // next shape of the same colour that touches this one: run across instead of trimming
-          else if (si === 0 && d <= 12 && segInsideAny(cur, p0, [o, objs[lastObj]])) connect = true;
+          else if (si === 0 && d <= 12 && segInsideAny(cur, p0, [o, objs[lastObj]]) && overSewn([cur, p0]) < 0.15) connect = true;
           else if (si > 0 && s.phase === 'under' && d <= 30 && segInside(cur, p0, o)) connect = true;
           else if (si > 0 && o.kind === 'area') {
-            // travel along the inside edge (hidden by the edge stitching) instead of across finished stitches
-            const r = routeAlongEdge(o.rings, cur, p0, res.occ);
-            if (r && pathLength(r, false) < Math.max(60, d * 4)) { route = r; connect = true; }
-            else if (d <= (s.joinInside ? 4 : 6) && segInside(cur, p0, o)) connect = true;
+            // travel along the inside edge, where the stitching still to come hides it; never over
+            // stitching already done (it would lie on top and show), so trim instead
+            const r = routeAlongEdge(o.rings, cur, p0, res.occ, testOpts.oldTravel ? null : sewn);
+            if (r && pathLength(r, false) < Math.max(60, d * 4) && overSewn(r) < 0.15) { route = r; connect = true; }
+            else if (d <= (s.joinInside ? 4 : 6) && segInside(cur, p0, o) && overSewn([cur, p0]) < 0.15) connect = true;
           }
         }
+        if (connect) { const P = route || [cur, p0]; const L = pathLength(P, false); travel.mm += L; travel.overMm += measure(P) * L; }
         if (connect && route) {
           const pts = runPath(route, false, 2.5, false);
           for (let k = 1; k < pts.length; k++) stitchTo(pts[k], oi);
@@ -2180,21 +2193,23 @@ const Core = (() => {
           started = true;
         }
         for (let i = 1; i < s.pts.length; i++) stitchTo(s.pts[i], oi);
+        // finished satin is what travel must keep off (on fill it blends in with the rows)
+        if (s.phase !== 'under' && (o.type === 'satin' || s.joinInside)) sewn.addLine(s.pts);
       });
       lastObj = oi;
     });
     if (started) tieOff(OBJ[OBJ.length - 1]);
     for (const c of C) if (c === 0) stitches++;
-    return { X, Y, C, OBJ, colors, stitches };
+    return { X, Y, C, OBJ, colors, stitches, travel };
   }
   /* run from a to b along the inside of the outline, if both are near the same edge */
   /* run from a to b along an edge: the shape's own outline (tucked just inside it), or the edge of a
      shape sewn later on top (tucked under that shape so it gets covered) */
-  function routeAlongEdge(rings, a, b, occ) {
+  function routeAlongEdge(rings, a, b, occ, sewn) {
     const tryRings = (R, under) => {
       const P = nearestOnRings(R, a), Q = nearestOnRings(R, b);
       if (!(P.d < 2.5) || !(Q.d < 2.5) || P.ri !== Q.ri) return null;
-      const path = edgePath([R[P.ri]], a, b, 2.5);
+      const path = edgePath([R[P.ri]], a, b, 2.5, 1, sewn || null);
       if (path.length < 2) return null;
       const ring = [R[P.ri]];
       const ins = path.map((q, i) => {
@@ -2232,7 +2247,7 @@ const Core = (() => {
 
   return {
     clamp, dist, lerp, ringArea, ringsArea, perimeter, bbox, pointInRings, segDist, simplify,
-    analyze, generate, assemble, runPath, resample, edgeIndex, edgeList, catmull, autoGuides, guidePreview, measureWidths, captureEdges, ctrlFrames, railDense, snapToEdge, columnPreview, autoColumns, nearestOnRings, railSnap, railSlide, nodeHandles, borderPreview, edgePath, satinFollowColumns, pathOverlap,
+    analyze, generate, assemble, runPath, resample, edgeIndex, edgeList, catmull, autoGuides, guidePreview, measureWidths, captureEdges, ctrlFrames, railDense, snapToEdge, columnPreview, autoColumns, nearestOnRings, railSnap, railSlide, nodeHandles, borderPreview, edgePath, satinFollowColumns, pathOverlap, testOpts,
   };
 })();
 if (typeof module !== 'undefined') module.exports = Core;
