@@ -1117,7 +1117,8 @@ const Core = (() => {
           // only where the stroke carries on well past the junction on both sides (a crossing), not near an end
           const span = j - i;
           // and only a sag (the line dipping toward the junction), not a stroke that really bends there
-          if (a >= span * 0.4 && pts.length - 1 - b >= span * 0.4) {
+          const endK = testOpts.endK ?? 0.05;
+          if (a >= span * endK && pts.length - 1 - b >= span * endK) {
             const hwJ = Math.max(0.3, idx.nearest(pts[a][0], pts[a][1]), idx.nearest(pts[b][0], pts[b][1]));
             let dev = 0; for (let k = i; k < j; k++) dev = Math.max(dev, segDist(pts[k][0], pts[k][1], pts[a][0], pts[a][1], pts[b][0], pts[b][1]));
             if (dev < (testOpts.sagK ?? 0.5) * hwJ) for (let k = i; k < j; k++) pts[k] = lerp(pts[a], pts[b], (k - a) / (b - a));
@@ -1181,6 +1182,8 @@ const Core = (() => {
       const npt = pts.length;
       raw.forEach((g, i) => {
         if (!g || g.tip || testOpts.noCornerReach) return;
+        // a bend inside a junction is the centre line dipping into it, not a corner of the stroke
+        if (!testOpts.reachInJ && junctions.some((J) => dist(g.q, J.q) < 1.7 * J.R + 0.3)) return;
         const k = Math.max(2, Math.round(Math.max(g.dt, 0.5) / step));
         const i0 = ch.closed ? (i - k + npt) % npt : Math.max(0, i - k), i1 = ch.closed ? (i + k) % npt : Math.min(npt - 1, i + k);
         const t0 = T[i0], t1 = T[i1];
