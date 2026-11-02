@@ -861,7 +861,7 @@ const Core = (() => {
         const jn = aEnd ? nb : na;
         const R = idx.nearest(...toMM(jn.pix));
         const len = br.pts.length * r;
-        if (len < 1.25 * R + 2 * r) {
+        if (len < (testOpts.spurK ?? 0.8) * R + 2 * r) {
           for (const q of br.pts) if (!(jn.mem.includes(q))) skel[q] = 0;
           pruned++;
         }
@@ -940,7 +940,16 @@ const Core = (() => {
         } else {
           // through the short links between the two junctions, each link used by one stroke only
           const path = bridgePath(A.nid, B.nid);
-          if (!path || path.some((st) => usedBridge.has(st.bi))) continue;
+          if (!path) continue;
+          if (path.some((st) => usedBridge.has(st.bi))) {
+            // the link is taken by the other stroke of this crossing (the stem of a t, the bar of an H):
+            // this stroke crosses it too, joining its arms straight across
+            if (testOpts.noShareBridge) continue;
+            link[A.bi][A.end] = { bi: B.bi, end: B.end };
+            link[B.bi][B.end] = { bi: A.bi, end: A.end };
+            taken.add(i); taken.add(j);
+            continue;
+          }
           let cur = { bi: A.bi, end: A.end };
           for (const st of path) {
             usedBridge.add(st.bi);
@@ -1020,6 +1029,33 @@ const Core = (() => {
     return { chains: out, idx, oidx, r, E };
   }
 
+  /* Round a tight bend the stitches on the inside of the turn would cross each other (a star of stitches
+     inside the stroke). Instead they pivot on the inside corner and fan out to the outside edge, the way
+     a hand digitizer turns a satin column round the point of a V. */
+  function unfoldRungs(R) {
+    if (testOpts.noUnfold || R.length < 3) return R;
+    const n = R.length, M = R.map((r) => lerp(r[0], r[1], 0.5));
+    const out = [R[0]];
+    for (let i = 1; i < n; i++) {
+      const t0 = M[Math.max(0, i - 4)], t1 = M[Math.min(n - 1, i + 4)];
+      let tx = t1[0] - t0[0], ty = t1[1] - t0[1]; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+      const [pa, pb] = out[out.length - 1];
+      let a = R[i][0], b = R[i][1];
+      const dA = (a[0] - pa[0]) * tx + (a[1] - pa[1]) * ty, dB = (b[0] - pb[0]) * tx + (b[1] - pb[1]) * ty;
+      const lim = -0.01;
+      if (dA < lim && dA < dB) a = pa;
+      else if (dB < lim && dB < dA) b = pb;
+      if (segX(pa, pb, a, b)) { if (dA < dB) a = pa; else b = pb; }
+      const r = [a, b]; if (R[i].cutA) r.cutA = true; if (R[i].cutB) r.cutB = true;
+      out.push(r);
+    }
+    return out;
+  }
+  const segX = (p, q, r, s) => {
+    const o = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    const d1 = o(r, s, p), d2 = o(r, s, q), d3 = o(p, q, r), d4 = o(p, q, s);
+    return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0)) && Math.abs(d1) > 1e-12 && Math.abs(d2) > 1e-12 && Math.abs(d3) > 1e-12 && Math.abs(d4) > 1e-12;
+  };
   function genSatinFollow(rings, occ, p, start, warn) {
     const step = p.spacing / 2 / 4;
     const columns = satinFollowColumns(rings, occ, p, warn);
@@ -1113,26 +1149,41 @@ const Core = (() => {
       if (!good.length) continue;
       const ws = good.map((g) => g.da + g.db).sort((a, b) => a - b);
       const wmed = ws[Math.floor(ws.length / 2)];
+      // round a sharp bend the outside of the turn reaches out into the corner (the point of a V or an M):
+      // let those stitches go all the way to the corner instead of trimming them like a spike
+      const npt = pts.length;
+      raw.forEach((g, i) => {
+        if (!g || g.tip || testOpts.noCornerReach) return;
+        const k = Math.max(2, Math.round(Math.max(g.dt, 0.5) / step));
+        const i0 = ch.closed ? (i - k + npt) % npt : Math.max(0, i - k), i1 = ch.closed ? (i + k) % npt : Math.min(npt - 1, i + k);
+        const t0 = T[i0], t1 = T[i1];
+        const cr = t0[0] * t1[1] - t0[1] * t1[0], dt = t0[0] * t1[0] + t0[1] * t1[1];
+        const turn = Math.atan2(cr, dt) * 180 / Math.PI;
+        if (Math.abs(turn) < (testOpts.reachDeg ?? 50)) return;
+        if (turn > 0) g.outerB = true; else g.outerA = true;
+      });
       // clamp sides near junctions / spikes
       for (const g of good) {
-        const lim = Math.max(1.35 * g.dt + 0.15, 0.6 * wmed);
-        g.da = Math.min(g.da, lim); g.db = Math.min(g.db, lim);
+        const lim = Math.max(1.35 * g.dt + 0.15, 0.6 * wmed), far = 3.2 * g.dt + 0.3;
+        g.da = Math.min(g.da, g.outerA ? far : lim); g.db = Math.min(g.db, g.outerB ? far : lim);
       }
       // median-smooth side distances
       const med = (arr, i, k) => { const s = []; for (let j = -k; j <= k; j++) { const v = arr[i + j]; if (v != null) s.push(v); } s.sort((a, b) => a - b); return s[Math.floor(s.length / 2)]; };
       const A0 = raw.map((g) => g && g.da), B0 = raw.map((g) => g && g.db);
       // median (removes spikes) then a gentle moving average (removes wobble) along the stroke
-      const A1 = raw.map((g, i) => g ? (g.tip ? g.da : med(A0, i, 8)) : null), B1 = raw.map((g, i) => g ? (g.tip ? g.db : med(B0, i, 8)) : null);
-      const avg = (arr, i, k) => { let s = 0, c = 0; for (let j = -k; j <= k; j++) { const v = arr[i + j]; if (v != null && !(raw[i + j] && raw[i + j].tip)) { s += v; c++; } } return c ? s / c : arr[i]; };
-      const A = raw.map((g, i) => g ? (g.tip ? A1[i] : avg(A1, i, 6)) : null), B = raw.map((g, i) => g ? (g.tip ? B1[i] : avg(B1, i, 6)) : null);
-      let rungs = [];
+      const A1 = raw.map((g, i) => g ? (g.tip || g.outerA ? g.da : med(A0, i, 8)) : null), B1 = raw.map((g, i) => g ? (g.tip || g.outerB ? g.db : med(B0, i, 8)) : null);
+      const avg = (arr, i, k, key) => { let s = 0, c = 0; for (let j = -k; j <= k; j++) { const v = arr[i + j], g = raw[i + j]; if (v != null && !(g && (g.tip || g[key]))) { s += v; c++; } } return c ? s / c : arr[i]; };
+      const A = raw.map((g, i) => g ? (g.tip || g.outerA ? A1[i] : avg(A1, i, 6, 'outerA')) : null), B = raw.map((g, i) => g ? (g.tip || g.outerB ? B1[i] : avg(B1, i, 6, 'outerB')) : null);
+      let rungs = []; const first = columns.length;
       raw.forEach((g, i) => {
-        if (!g) { if (rungs.length) { columns.push({ rungs, closed: false }); rungs = []; } return; }
+        if (!g) { if (rungs.length) { columns.push({ rungs: unfoldRungs(rungs), closed: false }); rungs = []; } return; }
         const a = A[i], b = B[i];
         if (a + b < 0.15) return;
         rungs.push([[g.q[0] + g.n[0] * a, g.q[1] + g.n[1] * a], [g.q[0] - g.n[0] * b, g.q[1] - g.n[1] * b]]);
       });
-      if (rungs.length) columns.push({ rungs, closed: ch.closed && rungs.length === pts.length });
+      if (rungs.length) columns.push({ rungs: unfoldRungs(rungs), closed: ch.closed && rungs.length === pts.length });
+      // whether the stroke's ends stick out free (not into another stroke)
+      if (columns.length > first) { columns[first].freeA = !!ch.freeA; columns[columns.length - 1].freeB = !!ch.freeB; }
       if (wmed > 7.5 && !(p.maxLen > 100) && warn) warn('Satin stitches wider than 7.5 mm are split in two.');
     }
     return p.overlap === 'allow' ? columns : splitCrossings(columns);
@@ -1140,8 +1191,50 @@ const Core = (() => {
   /* Where automatic satin strokes cross or meet (an X, the stem of a T, the bar of an A), the longest
      stroke runs straight through and the others stop at its edge, so the satin never lies in two layers.
      Strokes keep a slight overlap where they meet, so no fabric shows between them. */
+  /* A stroke that crosses itself (the loop of an L, the tail of a Q, the waist of a z) would lie in two
+     layers there: cut it where it comes back over itself, so the crossing is handled like any other. */
+  function cutSelfCrossings(columns) {
+    if (testOpts.noSelfCut) return columns;
+    const out = [];
+    const mid = (r) => lerp(r[0], r[1], 0.5);
+    const inQuad = (x, y, P) => { let c = false; for (let i = 0, j = 3; i < 4; j = i++) { const a = P[i], b = P[j]; if ((a[1] > y) !== (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0]) c = !c; } return c; };
+    for (const c0 of columns) {
+      let queue = [c0];
+      while (queue.length) {
+        const c = queue.shift(), R = c.rungs, n = R.length;
+        if (n < 8) { out.push(c); continue; }
+        const M = R.map(mid), S = [0];
+        for (let i = 1; i < n; i++) S.push(S[i - 1] + dist(M[i - 1], M[i]));
+        // the strip between each pair of rungs, filed in a coarse grid so each test looks at a few only
+        const cell = 1.0, grid = new Map();
+        for (let i = 1; i < n; i++) {
+          const P = [R[i - 1][0], R[i][0], R[i][1], R[i - 1][1]];
+          let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+          for (const q of P) { x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); y0 = Math.min(y0, q[1]); y1 = Math.max(y1, q[1]); }
+          const qd = { P, i, x0, x1, y0, y1 };
+          for (let gx = Math.floor(x0 / cell); gx <= Math.floor(x1 / cell); gx++) for (let gy = Math.floor(y0 / cell); gy <= Math.floor(y1 / cell); gy++) {
+            const k = gx * 73856093 ^ gy * 19349663; let b = grid.get(k); if (!b) grid.set(k, b = []); b.push(qd);
+          }
+        }
+        let cutAt = -1;
+        for (let j = 2; j < n && cutAt < 0; j++) {
+          const w = dist(R[j][0], R[j][1]), [x, y] = M[j];
+          for (const q of grid.get(Math.floor(x / cell) * 73856093 ^ Math.floor(y / cell) * 19349663) || []) {
+            if (q.i >= j || S[j] - S[q.i] < 3 * w + 1) continue;
+            if (x < q.x0 || x > q.x1 || y < q.y0 || y > q.y1) continue;
+            if (inQuad(x, y, q.P)) { cutAt = j; break; }
+          }
+        }
+        if (cutAt < 0 || (c.closed && cutAt >= n - 2)) { out.push(c); continue; }
+        // the part before the crossing, then the rest (which may cross itself again)
+        out.push({ rungs: R.slice(0, cutAt), closed: false });
+        queue.unshift({ rungs: R.slice(cutAt), closed: false });
+      }
+    }
+    return out;
+  }
   function splitCrossings(columns, keep = 0.3) {
-    const cols = columns.filter((c) => c.rungs.length >= 2);
+    const cols = cutSelfCrossings(columns.filter((c) => c.rungs.length >= 2)).filter((c) => c.rungs.length >= 2);
     if (cols.length < 2) return cols;
     const mid = (r) => lerp(r[0], r[1], 0.5);
     const lenOf = (c) => { let L = 0; for (let i = 1; i < c.rungs.length; i++) L += dist(mid(c.rungs[i - 1]), mid(c.rungs[i])); return L; };
@@ -1209,7 +1302,19 @@ const Core = (() => {
         return rr;
       });
     };
-    const order = cols.map((c, i) => [lenOf(c), i]).sort((a, b) => b[0] - a[0]).map((x) => cols[x[1]]);
+    // which stroke runs through: normally the longest; a straight, nearly level bar (the cross of a t, H, A
+    // or F) runs through whatever it crosses, the way hand digitizers sew it
+    const barBoost = (c) => {
+      // only a bar that crosses: both its ends stick out free (a bar ending against a stem, as in an E, doesn't)
+      if (testOpts.noBarRule || c.closed || c.rungs.length < 3 || !(c.freeA && c.freeB)) return 1;
+      const M = c.rungs.map(mid), L = lenOf(c);
+      const a = M[0], b = M[M.length - 1], ch = dist(a, b);
+      if (L < 1e-6 || ch / L < 0.85) return 1;
+      const ang = Math.abs(Math.atan2(b[1] - a[1], b[0] - a[0])) * 180 / Math.PI;
+      const tilt = Math.min(ang, 180 - ang);
+      return tilt < (testOpts.barTilt || 30) ? (testOpts.barK || 10) : 1;
+    };
+    const order = cols.map((c, i) => [lenOf(c) * barBoost(c), i]).sort((a, b) => b[0] - a[0]).map((x) => cols[x[1]]);
     const out = [];
     order.forEach((c, k) => {
       if (k === 0) { out.push(c); paint(c); return; }
@@ -1241,6 +1346,25 @@ const Core = (() => {
     return out;
   }
   function sewColumns(columns, p, start, step) {
+    if (!testOpts.greedySew) {
+      // the same planner as "best sew order": order, direction and starting side of every column, chosen
+      // from their real first and last needle points so the moves between them are short
+      const items = [];
+      columns.forEach((c, ci) => {
+        if (!c.rungs.length) return;
+        const opts = [];
+        for (const [rev, swap] of c.closed ? [[false, false], [false, true]] : [[false, false], [false, true], [true, false], [true, true]]) {
+          let rungs = rev ? c.rungs.slice().reverse() : c.rungs;
+          if (rev !== swap) rungs = rungs.map(flipRung);
+          const pts = satinFromRungs(rungs, { maxLen: p.maxLen, pull: p.pull, underlay: p.underlay !== 'none' && rungs.length > 6, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, closed: c.closed });
+          if (pts.length) opts.push({ pts, s: pts[0], e: pts[pts.length - 1] });
+        }
+        if (opts.length) items.push({ ci, opts });
+      });
+      if (items.length > 14) items.forEach((it) => { it.opts = it.opts.slice(0, 2); }); // keep big designs quick
+      const seq = planColumnOrder(items, start);
+      return seq.map((q) => ({ pts: items[q.k].opts[q.o].pts, phase: 'top', joinInside: true }));
+    }
     // order columns
     const segs = [];
     let pos = start;
@@ -1841,7 +1965,14 @@ const Core = (() => {
     };
     const twin = (k, o) => { const v = items[k].opts[o]; const j = items[k].opts.findIndex((w) => w.rev !== v.rev && w.swap === v.swap); return j < 0 ? o : j; };
     let best = null, bestC = Infinity;
-    for (let k0 = 0; k0 < n; k0++) for (let o0 = 0; o0 < items[k0].opts.length; o0++) {
+    // with many columns, start only from the few nearest where the thread is (or the top left)
+    let starts = items.map((_, k) => k);
+    if (n > 12) {
+      const ref = start || [Math.min(...items.map((it) => it.opts[0].s[0])), Math.min(...items.map((it) => it.opts[0].s[1]))];
+      starts = starts.map((k) => [Math.min(...items[k].opts.map((v) => dist(ref, v.s))), k]).sort((a, b) => a[0] - b[0]).slice(0, 3).map((x) => x[1]);
+    }
+    const maxPass = n > 30 ? 4 : n > 12 ? 12 : 60;
+    for (const k0 of starts) for (let o0 = 0; o0 < items[k0].opts.length; o0++) {
       const seq = [{ k: k0, o: o0 }], used = new Set([k0]);
       while (seq.length < n) {
         const end = V(seq[seq.length - 1]).e;
@@ -1854,7 +1985,7 @@ const Core = (() => {
       }
       let c = cost(seq), better = true, guard = 0;
       const take = (t) => { const tc = cost(t); if (tc < c - 1e-6) { seq.splice(0, n, ...t); c = tc; better = true; return true; } return false; };
-      while (better && guard++ < 60) {
+      while (better && guard++ < maxPass) {
         better = false;
         // another variant for one column
         for (let i = 0; i < n; i++) for (let o = 0; o < items[seq[i].k].opts.length; o++) {
