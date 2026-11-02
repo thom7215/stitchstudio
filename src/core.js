@@ -1564,7 +1564,8 @@ const Core = (() => {
     };
     return { add, addLine, overlap, get size() { return grid.size; } };
   }
-  function edgePath(rings, p, q, tol = 2.5, hop = 0, avoid = null) {
+  // flip: take the other way round the outline from the one that would be chosen
+  function edgePath(rings, p, q, tol = 2.5, hop = 0, avoid = null, flip = false) {
     const P = nearestOnRings(rings, p);
     if (!(P.d <= tol)) return [p, q];
     let Q = nearestOnRings(rings, q, P.ri);
@@ -1573,7 +1574,7 @@ const Core = (() => {
     const Qany = nearestOnRings(rings, q);
     if (!hop && Qany.ri !== P.ri && Qany.d <= tol && Qany.d + 0.05 < Q.d) {
       const J = nearestOnRings(rings, p, Qany.ri);
-      const along = edgePath(rings, J.pt, q, tol, 1, avoid);
+      const along = edgePath(rings, J.pt, q, tol, 1, avoid, flip);
       return [p].concat(along);
     }
     if (!(Q.d <= tol)) return [p, q];
@@ -1598,7 +1599,7 @@ const Core = (() => {
     // the shorter way round, unless it runs back over a rail already traced
     let lf = pathLength(fwd, false), lb = pathLength(back, false);
     if (avoid && avoid.size) { lf += 20 * avoid.overlap(fwd); lb += 20 * avoid.overlap(back); }
-    return lf <= lb ? fwd : back;
+    return (lf <= lb) !== !!flip ? fwd : back;
   }
   function snapToEdge(rings, p, tol) {
     const P = nearestOnRings(rings, p);
@@ -1630,6 +1631,7 @@ const Core = (() => {
     return out;
   }
   /* rail = { pts: [clicked points], modes: [one per segment: 'edge' | 'curve' | 'line'], closed, handles } */
+  function pathOverlap(path, lines) { const ix = avoidIndex(); for (const L of lines) if (L && L.length > 1) ix.addLine(L); return ix.overlap(path); }
   // `others`: lines (such as the first rail of a column) that edge-following parts should not run over
   function railDense(rail, rings, others) {
     const pts = rail.pts || [];
@@ -1646,7 +1648,7 @@ const Core = (() => {
       const mode = (rail.modes && rail.modes[i]) || 'curve';
       let seg;
       for (; added + 1 < out.length; added++) avoid.add(out[added], out[added + 1]);
-      if (mode === 'edge') seg = edgePath(rings, a, b, 2.5, 0, avoid);
+      if (mode === 'edge') seg = edgePath(rings, a, b, 2.5, 0, avoid, !!(rail.flip && rail.flip[i]));
       else if (mode === 'line') seg = [a, b];
       else {
         const ha = nodeHandles(rail, i), hb = nodeHandles(rail, (i + 1) % pts.length);
@@ -2230,7 +2232,7 @@ const Core = (() => {
 
   return {
     clamp, dist, lerp, ringArea, ringsArea, perimeter, bbox, pointInRings, segDist, simplify,
-    analyze, generate, assemble, runPath, resample, edgeIndex, edgeList, catmull, autoGuides, guidePreview, measureWidths, captureEdges, ctrlFrames, railDense, snapToEdge, columnPreview, autoColumns, nearestOnRings, railSnap, railSlide, nodeHandles, borderPreview, edgePath, satinFollowColumns,
+    analyze, generate, assemble, runPath, resample, edgeIndex, edgeList, catmull, autoGuides, guidePreview, measureWidths, captureEdges, ctrlFrames, railDense, snapToEdge, columnPreview, autoColumns, nearestOnRings, railSnap, railSlide, nodeHandles, borderPreview, edgePath, satinFollowColumns, pathOverlap,
   };
 })();
 if (typeof module !== 'undefined') module.exports = Core;

@@ -1223,6 +1223,42 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     return o.columns && o.columns[a.ci] ? o.columns[a.ci][a.rail] : null;
   }
   function newColDraft() { return { stage: 'A', A: { pts: [], modes: [] }, B: { pts: [], modes: [] } }; }
+  /* The way the next part of a rail gets from the last dot to the cursor. Space switches between them for
+     this part only: the usual route, a straight jump across a gap (then the rail carries on as before), or,
+     on a shape edge, the other way round the outline. Placing the dot keeps the choice and goes back to
+     the usual route for the next part. */
+  const ROUTE_LABEL = { auto: 'Follow the outline', jump: 'Jump the gap', other: 'Other way round' };
+  function routeOptions() {
+    const co = colObj(), d = ui.colDraft;
+    if (!co || !d || !ui.cursor) return ['auto'];
+    const cur = d[d.stage];
+    if (!cur.pts.length || ui.railMode === 'line') return ['auto'];
+    const opts = ['auto', 'jump'];
+    if (ui.railMode === 'edge') {
+      // the other way round, unless it only runs back over rails already drawn
+      try {
+        const a = cur.pts[cur.pts.length - 1], b = ui.snap || ui.cursor;
+        const lines = [Core.railDense(cur, co.rings)];
+        if (d.stage === 'B' && d.A.pts.length >= 2) lines.push(Core.railDense(d.A, co.rings));
+        // worked out the same way as the preview: keeping off the rails already drawn
+        const seg = (flip) => Core.railDense({ pts: [a, b], modes: ['edge'], flip: [flip] }, co.rings, lines);
+        const usual = seg(false), other = seg(true);
+        const len = (P) => { let L = 0; for (let i = 1; i < P.length; i++) L += Core.dist(P[i - 1], P[i]); return L; };
+        const differs = Math.abs(len(other) - len(usual)) > 0.5;
+        if (differs && Core.pathOverlap(other, lines) < 1) opts.push('other');
+      } catch (e) { }
+    }
+    return opts;
+  }
+  function cycleRoute() {
+    const opts = routeOptions();
+    const i = opts.indexOf(ui.route || 'auto');
+    ui.route = opts[(i + 1) % opts.length];
+    draw();
+    toast(ROUTE_LABEL[ui.route], 1200);
+  }
+  // mode and flip for the part from the last dot to the cursor (or to a newly placed dot)
+  const routeMode = () => ui.route === 'jump' ? 'line' : ui.railMode;
   function colObj() {
     const sel = selected();
     if (sel.length !== 1) return null;
@@ -1261,10 +1297,12 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   function popRailDot(r) {
     if (r.closed) { r.closed = false; r.modes.length = Math.max(0, r.pts.length - 1); return; }
     if (r.pts.length) { r.pts.pop(); r.modes.length = Math.max(0, r.pts.length - 1); }
+    if (r.flip) r.flip.length = Math.min(r.flip.length, r.modes.length);
     if (r.handles) r.handles.length = Math.min(r.handles.length, r.pts.length);
   }
   function undoRailDot() {
     const d = ui.colDraft; if (!d) return;
+    ui.route = 'auto';
     const cur = d[d.stage];
     if (cur.pts.length || cur.closed) popRailDot(cur);
     else if (d.stage === 'B') { d.stage = 'A'; popRailDot(d.A); }
@@ -1300,6 +1338,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   function finishRail(closeLoop) {
     const o = colObj(), d = ui.colDraft;
     if (!o || !d) return;
+    ui.route = 'auto';
     const cur = d[d.stage];
     if (cur.pts.length < 2) { toast('A rail needs at least two dots.'); return; }
     if (closeLoop) { cur.closed = true; cur.modes.push(ui.railMode); }
@@ -1466,6 +1505,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         const r = b.R;
         r.pts.splice(a.pi, 1);
         if (r.handles) r.handles.splice(a.pi, 1);
+        if (r.flip) r.flip.splice(Math.min(a.pi, r.modes.length - 1), 1);
         r.modes.splice(Math.min(a.pi, r.modes.length - 1), 1);
         if (!r.closed) r.modes.length = r.pts.length - 1;
       } else { o.borders.splice(a.ci, 1); if (a.kind === 'rp') toast('Border removed.'); }
@@ -1488,6 +1528,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       }
       r.pts.splice(a.pi, 1);
       if (r.handles) r.handles.splice(a.pi, 1);
+      if (r.flip) r.flip.splice(Math.min(a.pi, r.modes.length - 1), 1);
       r.modes.splice(Math.min(a.pi, r.modes.length - 1), 1);
       if (!r.closed) r.modes.length = r.pts.length - 1;
     } else if (a.kind === 'col') o.columns.splice(a.ci, 1);
@@ -1639,15 +1680,15 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       for (const k of ['A', 'B']) {
         const r = d[k];
         if (!r.pts.length) continue;
-        let pts = r.pts.slice(), modes = r.modes.slice();
+        let pts = r.pts.slice(), modes = r.modes.slice(), flip = r.flip ? r.flip.slice() : [];
         const live = k === d.stage && ui.cursor;
-        if (live) { pts.push(ui.snap || ui.cursor); modes.push(ui.railMode); }
+        if (live) { pts.push(ui.snap || ui.cursor); modes.push(routeMode()); flip[modes.length - 1] = ui.route === 'other'; }
         modes.length = Math.max(0, (r.closed ? pts.length : pts.length - 1));
         let dense = pts;
         // the second rail keeps off the first, as the finished column will
         let others = null;
         if (k === 'B' && d.A.pts.length >= 2) { try { others = [Core.railDense(d.A, o.rings)]; } catch (e) { } }
-        try { dense = Core.railDense({ pts, modes, closed: r.closed }, o.rings, others); } catch (e) { }
+        try { dense = Core.railDense({ pts, modes, flip, closed: r.closed }, o.rings, others); } catch (e) { }
         const p = line(dense, r.closed);
         ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 5 * px; ctx.stroke(p);
         const ink = d.border ? '#0b8f8f' : RAIL;
@@ -1812,7 +1853,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       : (!cur.pts.length ? 'Now the OTHER edge. Start at the same end you started the first rail.' : 'Keep clicking along this edge. Click the last dot again (or Enter) to make the column.');
   }
   function setTool(t) {
-    ui.tool = t; ui.draft = []; ui.active = null; ui.snap = null;
+    ui.tool = t; ui.draft = []; ui.active = null; ui.snap = null; ui.route = 'auto';
     ui.colDraft = t === 'rail' ? newColDraft() : t === 'border' ? { ...newColDraft(), border: true } : null;
     if (t === 'border') ui.rtab = 'borders';
     else if (t === 'rail' || t === 'rung' || t === 'fillDir') ui.rtab = 'stitch';
@@ -1872,9 +1913,13 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       if (cur.pts.length >= 2 && Core.dist(cur.pts[cur.pts.length - 1], p) < tol) { finishRail(); return; }
       if (cur.pts.length >= 3 && Core.dist(cur.pts[0], p) < tol) { finishRail(true); return; }
       if (e.detail >= 2) return;
-      const q = placePoint(co, p, ui.railMode);
-      if (cur.pts.length) cur.modes.push(ui.railMode);
+      const q = placePoint(co, p, ui.route === 'jump' ? 'edge' : ui.railMode);
+      if (cur.pts.length) {
+        cur.modes.push(routeMode());
+        if (ui.route === 'other') { cur.flip = cur.flip || []; cur.flip[cur.modes.length - 1] = true; }
+      }
       cur.pts.push(q);
+      ui.route = 'auto';
       syncDrawBar(); draw();
       return;
     }
@@ -1958,6 +2003,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         const mode = r.modes[si] || 'curve';
         r.pts.splice(si + 1, 0, placePoint(co, [wx, wy], mode));
         r.modes.splice(si, 0, mode);
+        if (r.flip) r.flip.splice(si, 0, r.flip[si]);
         if (r.handles) r.handles.splice(si + 1, 0, null);
         ui.active = { kind: 'rp', ci: h.ci, rail: h.rail, pi: si + 1 };
         touch(co); checkpoint(); changed();
@@ -2100,9 +2146,10 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       else {
         const r = railRef(co, h);
         // always work from the rail as it was when the drag started
-        if (!dragState.orig) dragState.orig = { pts: r.pts.map((q) => q.slice()), modes: r.modes.slice(), handles: r.handles ? r.handles.slice() : null, pi: h.pi };
+        if (!dragState.orig) dragState.orig = { pts: r.pts.map((q) => q.slice()), modes: r.modes.slice(), handles: r.handles ? r.handles.slice() : null, flip: r.flip ? r.flip.slice() : null, pi: h.pi };
         const O = dragState.orig, pi0 = O.pi, n = O.pts.length;
         r.pts = O.pts.map((q) => q.slice()); r.modes = O.modes.slice(); if (O.handles) r.handles = O.handles.slice(); else delete r.handles;
+        if (O.flip) r.flip = O.flip.slice(); else delete r.flip;
         const closed = !!r.closed && n >= 3;
         const segIn = pi0 > 0 ? pi0 - 1 : (closed ? n - 1 : -1);
         const segOut = pi0 < n - 1 ? pi0 : (closed ? n - 1 : -1);
@@ -2119,6 +2166,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
           const ins = (at, pt, modeBefore, modeAfter, seg) => {
             r.pts.splice(at, 0, pt);
             r.modes[seg] = modeBefore; r.modes.splice(seg + 1, 0, modeAfter);
+            if (r.flip) r.flip.splice(seg + 1, 0, false);
             if (r.handles) r.handles.splice(at, 0, null);
           };
           // the piece after the dot first, so the index of the piece before it does not move
@@ -2362,6 +2410,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       } else cycleSegMode(colObj(), ui.active, e.shiftKey ? -1 : 1);
       return;
     }
+    if ((ui.tool === 'rail' || ui.tool === 'border') && e.key === ' ') { e.preventDefault(); cycleRoute(); return; }
     if (ui.tool === 'rail' || ui.tool === 'border') {
       if (e.key === 'Escape') { e.preventDefault(); keepDraft(); setTool(null); return; }
       if (e.key === 'Enter') { e.preventDefault(); finishRail(); return; }
