@@ -1667,6 +1667,36 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     }
   }
 
+  // small chevrons along a rail, pointing the way the column sews
+  function railArrows(P, closed, back, px, color) {
+    const pts = closed ? P.concat([P[0]]) : P;
+    if (pts.length < 2) return;
+    const cum = [0];
+    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Core.dist(pts[i - 1], pts[i]));
+    const total = cum[cum.length - 1];
+    if (total < 14 * px) return;
+    const gap = 130 * px, n = Math.max(1, Math.floor(total / gap));
+    const h = 5.5 * px;
+    let j = 1;
+    ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (let k = 0; k < n; k++) {
+      const sAt = total * (k + 0.5) / n;
+      while (j < cum.length - 1 && cum[j] < sAt) j++;
+      const a = pts[j - 1], b = pts[j], seg = cum[j] - cum[j - 1] || 1e-9, t = (sAt - cum[j - 1]) / seg;
+      const m = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+      // direction from a short stretch of rail, so tiny wiggles don't turn the arrow
+      const i0 = Math.max(0, j - 3), i1 = Math.min(pts.length - 1, j + 2);
+      let dx = pts[i1][0] - pts[i0][0], dy = pts[i1][1] - pts[i0][1];
+      const L = Math.hypot(dx, dy); if (L < 1e-9) continue;
+      dx /= L; dy /= L; if (back) { dx = -dx; dy = -dy; }
+      const tip = [m[0] + dx * h, m[1] + dy * h];
+      const l = [m[0] - dx * h - dy * h, m[1] - dy * h + dx * h], r = [m[0] - dx * h + dy * h, m[1] - dy * h - dx * h];
+      const path = new Path2D(); path.moveTo(l[0], l[1]); path.lineTo(tip[0], tip[1]); path.lineTo(r[0], r[1]);
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 5 * px; ctx.stroke(path);
+      ctx.strokeStyle = color; ctx.lineWidth = 2.4 * px; ctx.stroke(path);
+    }
+    ctx.restore();
+  }
   function paintColumns(s) {
     const o = colObj();
     if (!o) return;
@@ -1703,10 +1733,12 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       // stitch direction preview
       ctx.strokeStyle = on ? 'rgba(35,80,212,0.55)' : 'rgba(35,80,212,0.35)'; ctx.lineWidth = 1 * px;
       ctx.beginPath(); for (const [p, q] of pv.dirs) { ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); } ctx.stroke();
+      const pqd = plan && plan.find((q) => q.ci === ci), back = !!(pqd && pqd.rev);
       for (const P of [pv.A, pv.B]) {
         const p = line(P, pv.closed);
         ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 5 * px; ctx.stroke(p);
         ctx.strokeStyle = RAIL; ctx.lineWidth = (on ? 3 : 2.2) * px; ctx.stroke(p);
+        railArrows(P, pv.closed, back, px, RAIL);
       }
       if (pv.start) {
         // best sew order may sew a column from its end: show where it really starts (green) and ends (red)
@@ -2918,7 +2950,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       ${C.length ? `<details class="more" id="colsDetails" ${ui.colsOpen ? 'open' : ''}><summary>Columns (${C.length})</summary>
       ${C.length ? `<ol class="guides cols ${auto ? 'auto' : ''}">${order.map(({ ci: i, rev }) => { const col = C[i], pv = pvs[i]; return `<li class="${a && a.ci === i ? 'on' : ''}" data-ci="${i}">
           ${auto ? '' : '<span class="grip" aria-hidden="true">⋮⋮</span>'}<span class="gnum">${colNo(o, i)}</span><span class="gnm">Column ${colNo(o, i)}${col.A.closed && col.B.closed ? ' (loop)' : ''} <small>${pv ? railLen(pv.A).toFixed(0) + ' mm · ' + (col.rungs || []).length + ' rung' + ((col.rungs || []).length === 1 ? '' : 's') : 'unfinished: needs ' + (col.A.pts.length < 2 ? 'its first rail' : 'its second rail')}</small></span>
-          <span class="gact">${pv ? '' : '<button type="button" class="tiny" data-c="cont" title="Keep drawing this column">Continue</button>'}${auto ? (rev ? '<span class="revtag" title="Sewn from its end back to its start">⇄</span>' : '') : `<button type="button" class="tiny ghost" data-c="up" title="Sew earlier" ${i === 0 ? 'disabled' : ''}>↑</button><button type="button" class="tiny ghost" data-c="rev" title="Swap start and end">⇄</button>`}<button type="button" class="tiny ghost" data-c="del" title="Delete column">✕</button></span></li>`; }).join('')}</ol>`
+          <span class="gact">${pv ? '' : '<button type="button" class="tiny" data-c="cont" title="Keep drawing this column">Continue</button>'}${auto ? '' : `<button type="button" class="tiny ghost" data-c="up" title="Sew earlier" ${i === 0 ? 'disabled' : ''}>↑</button>`}${pv ? `<button type="button" class="tiny ${auto && rev ? 'toggle' : 'ghost'}" data-c="rev" aria-pressed="${!!(auto && rev)}" title="${auto ? (rev ? 'Best sew order runs this column backwards. Click to reverse it yourself (Best sew order turns off and keeps its order).' : 'Reverse this column (Best sew order turns off and keeps its order)') : 'Reverse the direction this column sews'}">⇄ Reverse</button>` : ''}<button type="button" class="tiny ghost" data-c="del" title="Delete column">✕</button></span></li>`; }).join('')}</ol>`
         : ''}
       ${a && C[a.ci] && (C[a.ci].rungs || []).length ? `<div class="row"><span class="lbl inline">Rungs in column ${colNo(o, a.ci)}</span>${C[a.ci].rungs.map((_, ri) => `<button type="button" class="tiny ${(a.kind === 'ru' || a.kind === 'rungline') && a.ri === ri ? 'toggle' : 'ghost'}" aria-pressed="${(a.kind === 'ru' || a.kind === 'rungline') && a.ri === ri}" data-rsel="${ri}">${ri + 1}</button>`).join('')}</div>` : ''}
       ${info}
@@ -2948,7 +2980,19 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         const C = o.columns;
         if (b.dataset.c === 'cont') { continueColumn(o, ci); return; }
         if (b.dataset.c === 'up' && ci > 0) [C[ci - 1], C[ci]] = [C[ci], C[ci - 1]];
-        if (b.dataset.c === 'rev') reverseColumn(C[ci]);
+        if (b.dataset.c === 'rev') {
+          const plan = colPlan(o);
+          if (plan) {
+            // keep what best sew order worked out (order and directions), then reverse this one by hand
+            const seen = new Set(plan.map((q) => q.ci));
+            const steps = plan.concat(C.map((_, k) => ({ ci: k, rev: false })).filter((q) => !seen.has(q.ci)));
+            const target = C[ci];
+            const next = steps.map((q) => { const c = C[q.ci]; if (q.rev) reverseColumn(c); return c; });
+            C.splice(0, C.length, ...next);
+            o.params.autoOrder = false;
+            reverseColumn(target);
+          } else reverseColumn(C[ci]);
+        }
         if (b.dataset.c === 'del') C.splice(ci, 1);
         ui.active = null;
         touch(o); checkpoint(); changed();
