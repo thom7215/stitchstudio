@@ -3330,11 +3330,12 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     ui.playing = true; $('playBtn').textContent = '❚❚ Pause';
     let last = performance.now();
     const n = A.X.length;
-    const rate = Math.max(300, n / 14); // finish in ~14 seconds
+    const rate = Math.max(300, n / 14); // at full speed: finish in ~14 seconds
     const step = (t) => {
       if (!ui.playing) return;
       const dt = (t - last) / 1000; last = t;
-      ui.sim = Math.min(1, ui.sim + rate * dt / n);
+      // the speed can be changed while it plays
+      ui.sim = Math.min(1, ui.sim + rate * (ui.playSpeed || 1) * dt / n);
       $('simRange').value = Math.round(ui.sim * 1000);
       draw();
       if (ui.sim >= 1) { stopPlay(); return; }
@@ -3342,6 +3343,11 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     };
     playRaf = requestAnimationFrame(step);
   };
+  // sewing speed for Watch it sew: full, half, quarter or an eighth (remembered on this computer)
+  try { ui.playSpeed = +localStorage.getItem('ss-speed') || 1; } catch (e) { ui.playSpeed = 1; }
+  function syncSpeed() { $('speedSeg').querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', +b.dataset.speed === ui.playSpeed)); }
+  $('speedSeg').querySelectorAll('button').forEach((b) => b.onclick = () => { ui.playSpeed = +b.dataset.speed; syncSpeed(); try { localStorage.setItem('ss-speed', ui.playSpeed); } catch (e) { } });
+  syncSpeed();
   function stopPlay(reset) {
     ui.playing = false; cancelAnimationFrame(playRaf);
     $('playBtn').textContent = '▶ Watch it sew';

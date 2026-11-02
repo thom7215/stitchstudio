@@ -313,3 +313,8 @@ body.fontmode #leftTabs, body.fontmode [data-ltab], body.fontmode .steps, body.f
 .glyphgrid button.done { background: var(--good-soft); border-color: var(--good); }
 .glyphgrid button[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
 .fontlist .sfont small::after { content: ' · digitized'; color: var(--accent); }
+
+.speedseg button { padding: 4px 8px; font-size: 12.5px; }
+.sim .speedseg { flex: none; }
+.sim #simRange { flex: 1; min-width: 80px; }
+.sim { min-width: 380px; }

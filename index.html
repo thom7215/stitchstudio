@@ -325,6 +325,11 @@ body.fontmode #leftTabs, body.fontmode [data-ltab], body.fontmode .steps, body.f
 .glyphgrid button[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
 .fontlist .sfont small::after { content: ' · digitized'; color: var(--accent); }
 
+.speedseg button { padding: 4px 8px; font-size: 12.5px; }
+.sim .speedseg { flex: none; }
+.sim #simRange { flex: 1; min-width: 80px; }
+.sim { min-width: 380px; }
+
 </style>
 </head>
 <body>
@@ -455,6 +460,7 @@ body.fontmode #leftTabs, body.fontmode [data-ltab], body.fontmode .steps, body.f
         <label class="check"><input type="checkbox" id="jumpsChk"> Show jumps</label>
         <div class="sim">
           <button id="playBtn" class="small">▶ Watch it sew</button>
+          <div class="seg speedseg" id="speedSeg" role="group" aria-label="Sewing speed"><button type="button" data-speed="0.125" title="One eighth speed">⅛×</button><button type="button" data-speed="0.25" title="Quarter speed">¼×</button><button type="button" data-speed="0.5" title="Half speed">½×</button><button type="button" data-speed="1" title="Full speed">1×</button></div>
           <input id="simRange" data-nostep type="range" min="0" max="1000" value="1000" aria-label="Sewing progress">
         </div>
       </div>
@@ -6954,11 +6960,12 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     ui.playing = true; $('playBtn').textContent = '❚❚ Pause';
     let last = performance.now();
     const n = A.X.length;
-    const rate = Math.max(300, n / 14); // finish in ~14 seconds
+    const rate = Math.max(300, n / 14); // at full speed: finish in ~14 seconds
     const step = (t) => {
       if (!ui.playing) return;
       const dt = (t - last) / 1000; last = t;
-      ui.sim = Math.min(1, ui.sim + rate * dt / n);
+      // the speed can be changed while it plays
+      ui.sim = Math.min(1, ui.sim + rate * (ui.playSpeed || 1) * dt / n);
       $('simRange').value = Math.round(ui.sim * 1000);
       draw();
       if (ui.sim >= 1) { stopPlay(); return; }
@@ -6966,6 +6973,11 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     };
     playRaf = requestAnimationFrame(step);
   };
+  // sewing speed for Watch it sew: full, half, quarter or an eighth (remembered on this computer)
+  try { ui.playSpeed = +localStorage.getItem('ss-speed') || 1; } catch (e) { ui.playSpeed = 1; }
+  function syncSpeed() { $('speedSeg').querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', +b.dataset.speed === ui.playSpeed)); }
+  $('speedSeg').querySelectorAll('button').forEach((b) => b.onclick = () => { ui.playSpeed = +b.dataset.speed; syncSpeed(); try { localStorage.setItem('ss-speed', ui.playSpeed); } catch (e) { } });
+  syncSpeed();
   function stopPlay(reset) {
     ui.playing = false; cancelAnimationFrame(playRaf);
     $('playBtn').textContent = '▶ Watch it sew';
