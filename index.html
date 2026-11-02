@@ -311,6 +311,20 @@ li.drop-after { box-shadow: inset 0 -3px 0 var(--accent); }
 .dsize .lock { padding: 2px 5px; font-size: 12px; }
 .statsrest { display: contents; }
 
+/* Stitch Studio / Font Studio switch */
+.modeseg button { padding: 5px 12px; font-size: 13px; }
+body:not(.fontmode) #fontPanel { display: none; }
+body.fontmode #leftTabs, body.fontmode [data-ltab], body.fontmode .steps, body.fontmode #exportBtn, body.fontmode #saveBtn, body.fontmode #openBtn, body.fontmode #projName { display: none !important; }
+.fontpanel { display: flex; flex-direction: column; gap: 8px; }
+.fontpanel select, .fontpanel input[type=text] { width: 100%; }
+.fontpanel .newfont { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--bg); }
+.fontpanel .status { margin: 0; font-size: 12px; color: var(--muted); }
+.glyphgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(30px, 1fr)); gap: 4px; }
+.glyphgrid button { height: 32px; padding: 0; font: 600 15px var(--body); background: var(--panel); position: relative; }
+.glyphgrid button.done { background: var(--good-soft); border-color: var(--good); }
+.glyphgrid button[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+.fontlist .sfont small::after { content: ' · digitized'; color: var(--accent); }
+
 </style>
 </head>
 <body>
@@ -318,9 +332,10 @@ li.drop-after { box-shadow: inset 0 -3px 0 var(--accent); }
   <header class="top">
     <div class="brand">
       <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><rect x="7" y="4" width="18" height="4" rx="1.5" fill="currentColor"/><rect x="7" y="24" width="18" height="4" rx="1.5" fill="currentColor"/><rect x="9" y="8" width="14" height="16" fill="var(--accent)"/><path d="M9 11l14 3M9 15l14 3M9 19l14 3" stroke="var(--panel)" stroke-width="1.2"/></svg>
-      <span>Stitch Studio</span>
+      <span class="brandname">Stitch Studio</span>
       <span class="projname" id="projName" title="Project name">Untitled project</span>
     </div>
+    <div class="seg modeseg" id="modeSeg" role="group" aria-label="Workspace"><button type="button" data-mode="studio" aria-pressed="true">Stitch Studio</button><button type="button" data-mode="font" aria-pressed="false">Font Studio</button></div>
     <ol class="steps" aria-label="Steps">
       <li id="step1"><b>1</b> Add artwork</li>
       <li id="step2"><b>2</b> Pick stitches</li>
@@ -337,6 +352,7 @@ li.drop-after { box-shadow: inset 0 -3px 0 var(--accent); }
 
   <main>
     <aside class="left panel">
+      <section id="fontPanel" class="fontpanel"></section>
       <nav class="tabs" id="leftTabs" role="tablist" aria-label="Add and set up">
         <button type="button" role="tab" data-tab="hoop">Hoop &amp; fabric</button>
         <button type="button" role="tab" data-tab="text">Text</button>
@@ -3580,6 +3596,13 @@ const Importer = (() => {
     for (let i = 0; i < out.length; i++) if (depth(i) % 2 === 1) glyph[i] = glyph[outerOf(i)];
     out.glyph = glyph;
     out.chars = placed.map((g) => g.ch);
+    // layout in mm (for building digitized fonts): where each character sits, its width, and the font's
+    // proportions, all scaled so the capital height equals t.height
+    const u = (t.height || 10) / capH;
+    out.unit = u;
+    out.placed = placed.map((g) => ({ ch: g.ch, x: (g.px != null ? g.px : g.cx - g.w / 2) * u, base: (g.py != null ? g.py : g.cy + capH / 2) * u, adv: (g.w + spacingPx) * u }));
+    const m = (ch) => { const k = ctx.measureText(ch); return { asc: (k.actualBoundingBoxAscent || 0) * u, desc: (k.actualBoundingBoxDescent || 0) * u, w: k.width * u }; };
+    out.metrics = { cap: t.height || 10, xh: m('x').asc, desc: m('gjpqy').desc, space: m(' ').w, lineH: lineH * u };
     return out;
   }
 
@@ -3830,6 +3853,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     if (hist.stack.length > 80) hist.stack.shift();
     hist.i = hist.stack.length - 1;
     updateUndo();
+    if (ui.mode === 'font') saveGlyph();
   }
   function restore(s) {
     const d = JSON.parse(s);
@@ -3844,9 +3868,9 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   function undo() {
     // while drawing rails or tracing a border, Undo takes back one dot at a time
     if ((ui.tool === 'rail' || ui.tool === 'border') && undoDrawStep()) return;
-    if (hist.i > 0) { hist.i--; restore(hist.stack[hist.i]); updateUndo(); }
+    if (hist.i > 0) { hist.i--; restore(hist.stack[hist.i]); updateUndo(); if (ui.mode === 'font') saveGlyph(); }
   }
-  function redo() { if (hist.i < hist.stack.length - 1) { hist.i++; restore(hist.stack[hist.i]); updateUndo(); } }
+  function redo() { if (hist.i < hist.stack.length - 1) { hist.i++; restore(hist.stack[hist.i]); updateUndo(); if (ui.mode === 'font') saveGlyph(); } }
   function updateUndo() { $('undoBtn').disabled = hist.i <= 0 && !canUndoDrawStep(); $('redoBtn').disabled = hist.i >= hist.stack.length - 1; }
 
   /* ---------------- objects ---------------- */
@@ -3923,7 +3947,14 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   const formHeight = () => { const v = +$('txtH').value; return ui.txtHReal != null && v === ui.txtHShown ? ui.txtHReal : v; };
   async function scaleObjects(list, sx, sy, cx, cy) {
     for (const o of list) {
-      if (o.text) {
+      if (o.text && o.text.sfont) {
+        // a letter from a digitized font: its rails are part of it, so it is scaled like a shape
+        mapGeom(o, (p) => [cx + (p[0] - cx) * sx, cy + (p[1] - cy) * sy]);
+        const k = Math.sqrt(Math.abs(sx * sy));
+        if (o.borders) o.borders.forEach((b) => { b.width = +((b.width || 1.5) * k).toFixed(2); });
+        o.text.height = Math.max(2, o.text.height * k);
+        o.text.cx = cx + (o.text.cx - cx) * sx; o.text.cy = cy + (o.text.cy - cy) * sy;
+      } else if (o.text) {
         const oh = o.text.height;
         o.text.height = Math.max(2, o.text.height * Math.sqrt(sx * sy));
         const k = o.text.height / oh, ocx = o.text.cx, ocy = o.text.cy;
@@ -3946,6 +3977,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       if (o.text) {
         const q = f([o.text.cx, o.text.cy]); o.text.cx = q[0]; o.text.cy = q[1];
         o.text.rot = ((o.text.rot || 0) + deg) % 360;
+        if (o.text.sfont) { mapGeom(o, f); continue; }
         mapGuides(o, f);
         await rebuildText(o);
       } else mapGeom(o, f);
@@ -3954,7 +3986,8 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   async function flip(list, cx) {
     for (const o of list) {
       if (o.guides) for (const g of o.guides) if (g.e) g.e = g.e.map(([ta, na, tb, nb]) => [tb, -nb, ta, -na]);
-      if (o.text) { o.text.cx = 2 * cx - o.text.cx; o.text.flip = !o.text.flip; mapGuides(o, (p) => [2 * cx - p[0], p[1]]); await rebuildText(o); }
+      if (o.text && o.text.sfont) { o.text.cx = 2 * cx - o.text.cx; o.text.flip = !o.text.flip; mapGeom(o, (p) => [2 * cx - p[0], p[1]]); o.rings = o.rings.map((r) => r.slice().reverse()); }
+      else if (o.text) { o.text.cx = 2 * cx - o.text.cx; o.text.flip = !o.text.flip; mapGuides(o, (p) => [2 * cx - p[0], p[1]]); await rebuildText(o); }
       else { mapGeom(o, (p) => [2 * cx - p[0], p[1]]); o.rings = o.rings.map((r) => r.slice().reverse()); }
     }
   }
@@ -3975,6 +4008,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   }
   async function rebuildText(o) {
     const t = o.text;
+    if (t.sfont) return;
     const all = await traceTextCached(t);
     let rings = t.letter == null ? all : all.filter((r, i) => all.glyph && all.glyph[i] === t.letter);
     const rot = (t.rot || 0) * Math.PI / 180, c = Math.cos(rot), s = Math.sin(rot);
@@ -4002,6 +4036,9 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   }
   function syncTextUI() {
     $('boldBtn').setAttribute('aria-pressed', ui.bold); $('italBtn').setAttribute('aria-pressed', ui.italic);
+    // a digitized font has its own weight and slant
+    const sfSel = isSfont(ui.font);
+    $('boldBtn').disabled = sfSel; $('italBtn').disabled = sfSel;
     $('txtHo').textContent = formHeight().toFixed(1).replace(/\.0$/, '') + ' mm';
     $('txtSpo').textContent = $('txtSp').value;
     const ls = +$('txtLs').value;
@@ -4026,6 +4063,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   }
   // one object per letter, so every letter can get its own stitch type and its own manual columns
   async function makeLetters(t, place, color, group, old) {
+    if (isSfont(t.font)) return makeStitchLetters(t, place, color, group);
     const all = await traceTextCached(t);
     const word = t.str.split('\n')[0].slice(0, 24);
     const idx = [...new Set(all.glyph || [])].sort((a, b) => a - b);
@@ -4052,7 +4090,8 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       if (ed) {
         const members = wordOf(ed);
         const prev = ed.text;
-        const same = ['str', 'font', 'bold', 'italic', 'spacing', 'curve'].every((k) => prev[k] === t[k]) && (prev.lineSpacing || 1) === t.lineSpacing && (prev.align || 'center') === t.align && ed.text.letter != null;
+        const sf = isSfont(t.font);
+        const same = ['str', 'font', 'bold', 'italic', 'spacing', 'curve'].every((k) => prev[k] === t[k]) && (prev.lineSpacing || 1) === t.lineSpacing && (prev.align || 'center') === t.align && ed.text.letter != null && (!sf || Math.abs(prev.height - t.height) < 1e-6);
         const recolor = color !== ed.color;
         if (same) {
           // only the size or colour changed: keep every letter, its columns and its settings
@@ -4064,8 +4103,9 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
               if (m.guides && m.guides.length) mapGuides(m, (q) => [p.cx + (q[0] - p.cx) * k, p.cy + (q[1] - p.cy) * k], k);
               if (m.borders) m.borders.forEach((bd) => { bd.width = +((bd.width || 1.5) * k).toFixed(2); });
             }
-            Object.assign(m.text, { ...t, letter: m.text.letter });
+            Object.assign(m.text, { ...t, letter: m.text.letter, sfont: m.text.sfont });
             if (recolor) m.color = color;
+            if (m.text.sfont) { touch(m); continue; }
             await rebuildText(m);
             if (m.auto) autoPick(m);
           }
@@ -4073,7 +4113,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
           const empty = members.filter((m) => !m.rings.length);
           if (empty.length) { S.objects = S.objects.filter((q) => !empty.includes(q)); empty.forEach((m) => ui.sel.delete(m.id)); if (empty.some((m) => m.id === ui.editingText)) { const k = members.find((m) => m.rings.length); ui.editingText = k ? k.id : null; } }
         } else {
-          if (members.some((m) => (m.columns && m.columns.length) || (m.guides && m.guides.length) || (m.borders && m.borders.length))) toast('Hand-drawn columns and borders on these letters were cleared.', 4200);
+          if (!sf && !(prev.sfont) && members.some((m) => (m.columns && m.columns.length) || (m.guides && m.guides.length) || (m.borders && m.borders.length))) toast('Hand-drawn columns and borders on these letters were cleared.', 4200);
           const place = { cx: prev.cx, cy: prev.cy, rot: prev.rot || 0, flip: !!prev.flip };
           const group = ed.text.letter != null && ed.group ? ed.group : 'txt-' + Date.now().toString(36);
           const made = await makeLetters(t, place, recolor ? color : ed.color, group, ed.text.letter != null ? members : null);
@@ -4126,6 +4166,13 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     ];
     let html = '';
     let any = false;
+    // fonts digitized in Font Studio come first; the sample is shown in the font they were traced from
+    const sf = sfonts.filter((f) => !q || f.name.toLowerCase().includes(q));
+    if (sf.length) {
+      any = true;
+      html += `<div class="grp">Digitized fonts</div>`;
+      for (const f of sf) html += `<button type="button" role="option" class="sfont" data-font="sfont:${f.id}" aria-selected="${ui.font === 'sfont:' + f.id}" style="font-family:&quot;${esc(f.source.font)}&quot;,sans-serif;${f.source.bold ? 'font-weight:700;' : ''}${f.source.italic ? 'font-style:italic;' : ''}" title="${esc(f.name)}"><span>${esc(sample)}</span><small>${esc(f.name)}</small></button>`;
+    }
     for (const [label, list] of groups) {
       const L = list.filter((f) => !q || f.toLowerCase().includes(q));
       if (!L.length) continue;
@@ -4313,6 +4360,15 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     draw();
   }
   function fitView() {
+    // Font Studio: fill the view with the character and its guides
+    if (ui.mode === 'font' && typeof curFont === 'function' && curFont() && fontWs.ch) {
+      const f = curFont(), g = f.glyphs[fontWs.ch], [ox, oy] = fontWs.off;
+      const x0 = ox - f.cap * 0.9, x1 = ox + g.adv + f.cap * 1.6, y0 = oy - f.cap * 1.5, y1 = oy + f.metrics.desc + f.cap * 0.5;
+      view.s = Math.min(cw / (x1 - x0), ch / (y1 - y0));
+      view.ox = cw / 2 - (x0 + x1) / 2 * view.s; view.oy = ch / 2 - (y0 + y1) / 2 * view.s;
+      draw();
+      return;
+    }
     const h = hoop();
     const bb = unionBBox(S.objects);
     const G = hoopGeom(h);
@@ -4575,6 +4631,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const bn = HOOP_BRANDS[brandOf(S.hoop)].name;
     ctx.fillText(`${brandOf(S.hoop) === 'generic' ? '' : bn.replace(/\s*\(.*/, '') + ' · '}${(HOOPS.find((x) => x.id === S.hoop) || HOOPS[0]).name.replace(/\s*\(.*/, '')} · stitch area ${h.w} × ${h.h} mm`, -G.ex, G.ey + 16 / s);
     ctx.globalAlpha = 1;
+    if (ui.mode === 'font') paintFontGuides(s);
 
     // live preview of a move or a resize of the selection: x' = a*x + e, y' = d*y + f
     let dragOff = null;
@@ -7144,6 +7201,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const b = e.target.closest('button[data-font]'); if (!b) return;
     ui.font = b.dataset.font;
     $('fontList').querySelectorAll('button').forEach((x) => x.setAttribute('aria-selected', x === b));
+    syncTextUI();
     liveText();
   };
   $('fontSearch').oninput = renderFontList;
@@ -7290,10 +7348,287 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   }
   new MutationObserver(() => addSteppers()).observe(document.body, { childList: true, subtree: true });
 
+
+  /* =====================================================================================
+     Font Studio: digitize a whole font once, then type with it in Stitch Studio.
+     A digitized font keeps, for every character, its outline and everything drawn on it (stitch type,
+     manual rails and rungs, borders), in millimetres at the size it was digitized (capital height `cap`),
+     with the baseline at y = 0 and the left edge of the character at x = 0.
+     ===================================================================================== */
+  const FONT_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const FONT_KEY = 'ss-fonts';
+  let sfonts = [];
+  try { sfonts = JSON.parse(localStorage.getItem(FONT_KEY) || '[]'); if (!Array.isArray(sfonts)) sfonts = []; } catch (e) { sfonts = []; }
+  function isSfont(f) { return typeof f === 'string' && f.startsWith('sfont:'); }
+  function sfontById(id) { return sfonts.find((f) => f.id === id) || null; }
+  const roundJSON = (k, v) => (typeof v === 'number' ? Math.round(v * 1000) / 1000 : v);
+  let fontSaveTimer = null;
+  function saveFonts(now) {
+    clearTimeout(fontSaveTimer);
+    const go = () => {
+      try { localStorage.setItem(FONT_KEY, JSON.stringify(sfonts, roundJSON)); }
+      catch (e) { toast('This browser has no room left for more fonts. Export them to files to keep them safe.', 6000); }
+    };
+    if (now) go(); else fontSaveTimer = setTimeout(go, 500);
+  }
+  // what is kept of a shape inside a font
+  function glyphObj(o, dx, dy) {
+    const c = JSON.parse(JSON.stringify({ kind: o.kind, rings: o.rings, paths: o.paths, width: o.width, type: o.type, params: o.params, columns: o.columns || [], borders: o.borders || [], guides: o.guides, dirs: o.dirs }));
+    if (dx || dy) { const tmp = { ...c, rings: c.rings, paths: c.paths || [] }; mapGeom(tmp, (q) => [q[0] + dx, q[1] + dy]); Object.assign(c, { rings: tmp.rings, paths: tmp.paths, columns: tmp.columns, borders: tmp.borders, guides: tmp.guides, dirs: tmp.dirs }); }
+    return c;
+  }
+  // does this character sew anything yet?
+  function glyphDone(g) {
+    return !!(g && g.objects && g.objects.some((o) => o.type !== 'skip' && !(o.type === 'satin' && o.kind === 'area' && (o.params || {}).satinDir === 'columns' && !(o.columns && o.columns.length))));
+  }
+  async function createStitchFont(opts) {
+    const f = { id: 'sf' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: opts.name, source: { font: opts.font, bold: !!opts.bold, italic: !!opts.italic }, cap: opts.cap, metrics: null, glyphs: {}, created: Date.now() };
+    for (const ch of FONT_CHARS) {
+      const t = { str: ch, font: opts.font, bold: !!opts.bold, italic: !!opts.italic, height: opts.cap, spacing: 0, curve: 0, lineSpacing: 1, align: 'center' };
+      const all = await Importer.traceText(t);
+      if (!f.metrics && all.metrics) f.metrics = all.metrics;
+      const g = all.placed && all.placed[0];
+      if (!g) { f.glyphs[ch] = { adv: opts.cap * 0.6, objects: [] }; continue; }
+      const rings = all.map((r) => r.map(([x, y]) => [x - g.x, y - g.base]));
+      const o = makeObj({ kind: 'area', rings, color: '#6cb4ee', name: ch });
+      if (rings.length) autoPick(o);
+      f.glyphs[ch] = { adv: g.adv, objects: rings.length ? [glyphObj(o)] : [] };
+    }
+    f.metrics = f.metrics || { cap: opts.cap, xh: opts.cap * 0.7, desc: opts.cap * 0.25, space: opts.cap * 0.3, lineH: opts.cap * 1.8 };
+    sfonts.push(f); saveFonts(true);
+    return f;
+  }
+
+  /* ---- typing with a digitized font: each letter is a copy of the character, sized and placed ---- */
+  async function makeStitchLetters(t, place, color, group) {
+    const f = sfontById(t.font.slice(6));
+    if (!f) { toast('That digitized font is not in this browser.'); return []; }
+    const k = t.height / f.cap, M = f.metrics;
+    const sp = (t.spacing || 0) / 100 * t.height / 0.7;
+    const lines = t.str.split('\n');
+    const lineH = M.lineH * k * (t.lineSpacing || 1);
+    const missing = new Set();
+    const rows = lines.map((ln) => {
+      const items = Array.from(ln).map((ch) => {
+        const g = f.glyphs[ch];
+        if (!g) { if (ch.trim()) missing.add(ch); return { ch, adv: (ch === ' ' ? M.space : M.space) * k, g: null }; }
+        return { ch, adv: g.adv * k, g };
+      });
+      const total = items.reduce((a, it) => a + it.adv + sp, 0) - (items.length ? sp : 0);
+      return { items, total };
+    });
+    const widest = Math.max(0, ...rows.map((r) => r.total));
+    const align = t.align || 'center', curve = t.curve || 0;
+    const rot = (place.rot || 0) * Math.PI / 180, rc = Math.cos(rot), rs = Math.sin(rot);
+    const word = t.str.split('\n')[0].slice(0, 24);
+    const made = [];
+    let gi = 0;
+    rows.forEach((row, li) => {
+      let x = align === 'left' ? -widest / 2 : align === 'right' ? widest / 2 - row.total : -row.total / 2;
+      const base = (li - (lines.length - 1) / 2) * lineH + t.height / 2;
+      for (const it of row.items) {
+        const myIndex = gi++;
+        if (it.g && it.g.objects.length) {
+          // where this character goes, before the text's own position, turn and mirror
+          let local;
+          if (!curve) local = (q) => [x + q[0] * k, base + q[1] * k];
+          else {
+            const theta = Math.abs(curve) / 100 * Math.PI * 1.6, R = (widest || 1) / theta;
+            const cxg = x + it.adv / 2, phi = cxg / R;
+            const rr = curve > 0 ? R - base + t.height / 2 : R + base - t.height / 2;
+            const gcx = rr * Math.sin(phi), gcy = curve > 0 ? -rr * Math.cos(phi) + R : rr * Math.cos(phi) - R;
+            const a = curve > 0 ? phi : -phi, ca = Math.cos(a), sa = Math.sin(a);
+            local = (q) => { const lx = q[0] * k - it.adv / 2, ly = q[1] * k + t.height / 2; return [gcx + lx * ca - ly * sa, gcy + lx * sa + ly * ca]; };
+          }
+          const tf = (q) => { let [px, py] = local(q); if (place.flip) px = -px; return [place.cx + px * rc - py * rs, place.cy + px * rs + py * rc]; };
+          for (const src of it.g.objects) {
+            const c = JSON.parse(JSON.stringify(src));
+            const o = makeObj({ kind: c.kind || 'area', rings: c.rings || [], paths: c.paths || [], width: (c.width || 0) * k, color, group, groupName: `“${word}”`, name: `${it.ch}  ·  “${word}”`, text: { ...t, ...place, letter: myIndex, sfont: f.id } });
+            o.type = c.type; o.params = { ...defaultParams(), ...(c.params || {}) }; o.auto = false;
+            o.columns = c.columns || []; o.borders = c.borders || [];
+            if (c.guides) o.guides = c.guides; if (c.dirs) o.dirs = c.dirs;
+            mapGeom(o, tf);
+            if (place.flip) o.rings = o.rings.map((r) => r.slice().reverse());
+            o.borders.forEach((b) => { b.width = +((b.width || 1.5) * k).toFixed(2); });
+            if (o.guides) o.guides = o.guides.map((g) => ({ ...g, w: g.w ? g.w.map((v) => v * k) : g.w, e: g.e ? g.e.map((r) => r.map((v) => v * k)) : g.e }));
+            made.push(o);
+          }
+        }
+        x += it.adv + sp;
+      }
+    });
+    if (missing.size) toast(`“${f.name}” has no ${[...missing].slice(0, 8).join(' ')} yet, so ${missing.size > 1 ? 'they are' : 'it is'} left as a space.`, 4200);
+    return made;
+  }
+
+  /* ---- the Font Studio workspace ---- */
+  ui.mode = 'studio';
+  const fontWs = { fontId: null, ch: null, off: [0, 0], studio: null, newOpen: false };
+  const curFont = () => sfontById(fontWs.fontId);
+  function setMode(m) {
+    if (m === ui.mode) return;
+    if (m === 'font') {
+      fontWs.studio = { snap: snapshot(), stack: hist.stack.slice(), i: hist.i, name: S.projectName };
+      ui.mode = 'font';
+      document.body.classList.add('fontmode');
+      S.objects = []; ui.sel = new Set(); ui.editingText = null; selectionChanged();
+      if (!curFont() && sfonts.length) fontWs.fontId = sfonts[sfonts.length - 1].id;
+      fontWs.ch = null;
+      if (curFont()) openGlyph(fontWs.ch || firstGlyph()); else { fontWs.newOpen = true; hist.stack = []; hist.i = -1; checkpoint(); changed(); }
+      renderFontPanel(); fitView();
+    } else {
+      saveGlyph(true);
+      ui.mode = 'studio';
+      document.body.classList.remove('fontmode');
+      const st = fontWs.studio;
+      ui.sel = new Set(); selectionChanged();
+      if (st) { restore(st.snap); hist.stack = st.stack; hist.i = st.i; updateUndo(); }
+      renderFontList(); syncTextUI(); fitView();
+    }
+    $('modeSeg').querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.mode === ui.mode));
+    document.querySelector('.brandname').textContent = ui.mode === 'font' ? 'Font Studio' : 'Stitch Studio';
+  }
+  const firstGlyph = () => FONT_CHARS[0];
+  function openGlyph(ch) {
+    const f = curFont(); if (!f) return;
+    saveGlyph(true);
+    fontWs.ch = ch;
+    const g = f.glyphs[ch] || (f.glyphs[ch] = { adv: f.cap * 0.6, objects: [] });
+    // show the character in the middle of the hoop
+    fontWs.off = [-g.adv / 2, f.cap / 2];
+    S.objects = g.objects.map((src) => {
+      const c = JSON.parse(JSON.stringify(src));
+      const o = makeObj({ kind: c.kind || 'area', rings: c.rings || [], paths: c.paths || [], width: c.width || 0, color: '#6cb4ee', name: `${ch} · ${f.name}` });
+      o.type = c.type; o.params = { ...defaultParams(), ...(c.params || {}) }; o.auto = false;
+      o.columns = c.columns || []; o.borders = c.borders || []; if (c.guides) o.guides = c.guides; if (c.dirs) o.dirs = c.dirs;
+      mapGeom(o, (q) => [q[0] + fontWs.off[0], q[1] + fontWs.off[1]]);
+      return o;
+    });
+    ui.sel = new Set(S.objects.length ? [S.objects[0].id] : []);
+    hist.stack = []; hist.i = -1;
+    selectionChanged(); checkpoint(); changed(); renderFontPanel(); fitView();
+  }
+  // write the character on the canvas back into the font
+  function saveGlyph(now) {
+    if (ui.mode !== 'font') return;
+    const f = curFont(); if (!f || !fontWs.ch) return;
+    const g = f.glyphs[fontWs.ch];
+    g.objects = S.objects.map((o) => glyphObj(o, -fontWs.off[0], -fontWs.off[1]));
+    f.updated = Date.now();
+    saveFonts(now);
+    renderGlyphGrid();
+  }
+  // the guides behind a character: baseline, capital and x-height, descender, and its width
+  function paintFontGuides(s) {
+    const f = curFont(); if (!f || !fontWs.ch) return;
+    const g = f.glyphs[fontWs.ch], M = f.metrics, [ox, oy] = fontWs.off;
+    const x0 = ox - f.cap * 1.2, x1 = ox + g.adv + f.cap * 1.2;
+    ctx.save();
+    ctx.lineWidth = 1 / s; ctx.setLineDash([5 / s, 4 / s]);
+    const hl = (y, col, label) => {
+      ctx.strokeStyle = col; ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
+      ctx.fillStyle = col; ctx.font = `${10 / s}px Archivo, sans-serif`; ctx.fillText(label, x1 + 2 / s, y + 3 / s);
+    };
+    hl(oy, 'rgba(217,48,37,0.75)', 'baseline');
+    hl(oy - f.cap, 'rgba(35,80,212,0.6)', 'capital');
+    hl(oy - M.xh, 'rgba(35,80,212,0.35)', 'x-height');
+    hl(oy + M.desc, 'rgba(35,80,212,0.35)', 'descender');
+    ctx.strokeStyle = 'rgba(18,161,80,0.7)';
+    for (const x of [ox, ox + g.adv]) { ctx.beginPath(); ctx.moveTo(x, oy - f.cap * 1.35); ctx.lineTo(x, oy + M.desc * 1.3); ctx.stroke(); }
+    ctx.restore();
+  }
+  function renderGlyphGrid() {
+    const box = $('sfGlyphs'), f = curFont();
+    if (!box) return;
+    if (!f) { box.innerHTML = ''; return; }
+    box.innerHTML = FONT_CHARS.split('').map((ch) => `<button type="button" data-ch="${esc(ch)}" class="${glyphDone(f.glyphs[ch]) ? 'done' : ''}" aria-pressed="${fontWs.ch === ch}" title="${glyphDone(f.glyphs[ch]) ? 'Digitized' : 'No stitches yet'}">${esc(ch)}</button>`).join('');
+    const n = FONT_CHARS.split('').filter((ch) => glyphDone(f.glyphs[ch])).length;
+    $('sfCount').textContent = `${n} of ${FONT_CHARS.length} characters digitized`;
+    box.querySelectorAll('button[data-ch]').forEach((b) => b.onclick = () => openGlyph(b.dataset.ch));
+  }
+  function sourceFontOptions(sel) {
+    const all = [...new Set([...fonts.added, ...fonts.local, ...fonts.web])];
+    return all.map((n) => `<option value="${esc(n)}" ${n === sel ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  }
+  function renderFontPanel() {
+    const box = $('fontPanel'); if (!box) return;
+    const f = curFont();
+    const g = f && fontWs.ch ? f.glyphs[fontWs.ch] : null;
+    const srcDefault = !isSfont(ui.font) && ui.font ? ui.font : pickDefaultFont();
+    box.innerHTML = `
+      <h2>Font Studio</h2>
+      ${sfonts.length ? `<label for="sfSel" class="lbl">Digitized font</label>
+      <select id="sfSel">${sfonts.map((x) => `<option value="${x.id}" ${f && x.id === f.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
+      <div class="row">
+        <button type="button" class="small ${fontWs.newOpen ? 'toggle' : 'ghost'}" id="sfNewBtn" aria-pressed="${fontWs.newOpen}">＋ New font</button>
+        <button type="button" class="small ghost" id="sfRename" ${f ? '' : 'disabled'}>Rename</button>
+        <button type="button" class="small ghost" id="sfDelete" ${f ? '' : 'disabled'}>Delete</button>
+      </div>
+      <div class="row">
+        <button type="button" class="small ghost" id="sfExport" ${f ? '' : 'disabled'}>Export file</button>
+        <button type="button" class="small ghost" id="sfImportBtn">Import file</button>
+      </div>` : `<div class="row"><button type="button" class="small ghost" id="sfImportBtn">Import file</button></div>`}
+      <input type="file" id="sfImport" accept=".json,application/json" hidden>
+      ${fontWs.newOpen || !sfonts.length ? `<div class="newfont">
+        <label for="sfName" class="lbl">Name</label><input type="text" id="sfName" value="${esc(srcDefault)} stitch" maxlength="40">
+        <label for="sfSrc" class="lbl">Traced from</label><select id="sfSrc">${sourceFontOptions(srcDefault)}</select>
+        <div class="row"><button type="button" class="toggle small" id="sfBold" aria-pressed="false"><b>Bold</b></button><button type="button" class="toggle small" id="sfItal" aria-pressed="false"><i>Italic</i></button></div>
+        <div class="field"><label for="sfCap">Capital height</label><input type="number" id="sfCap" min="5" max="80" step="1" value="25"><output>mm</output></div>
+        <button type="button" class="primary wide" id="sfCreate">Create font</button>
+      </div>` : ''}
+      ${f ? `<h2 style="margin-top:14px">Characters</h2>
+      <div class="glyphgrid" id="sfGlyphs"></div>
+      <p class="status" id="sfCount"></p>
+      ${g ? `<div class="field"><label for="sfAdv">Width of ${esc(fontWs.ch)}</label><input type="number" id="sfAdv" min="0.5" step="0.1" value="${g.adv.toFixed(1)}"><output>mm</output></div>` : ''}
+      <p class="status">Digitized at ${f.cap} mm capital height</p>` : ''}`;
+    renderGlyphGrid();
+    const sel = $('sfSel'); if (sel) sel.onchange = () => { saveGlyph(true); fontWs.fontId = sel.value; fontWs.newOpen = false; openGlyph(firstGlyph()); };
+    const nb = $('sfNewBtn'); if (nb) nb.onclick = () => { fontWs.newOpen = !fontWs.newOpen; renderFontPanel(); };
+    const rn = $('sfRename'); if (rn) rn.onclick = () => { const nm = prompt('Font name', f.name); if (nm && nm.trim()) { f.name = nm.trim().slice(0, 40); saveFonts(true); renderFontPanel(); } };
+    const del = $('sfDelete'); if (del) del.onclick = () => {
+      if (!confirm(`Delete “${f.name}”? Export it first if you might want it back.`)) return;
+      sfonts = sfonts.filter((x) => x !== f); saveFonts(true);
+      fontWs.fontId = sfonts.length ? sfonts[sfonts.length - 1].id : null; fontWs.ch = null;
+      if (curFont()) openGlyph(firstGlyph()); else { S.objects = []; ui.sel = new Set(); selectionChanged(); changed(); fontWs.newOpen = true; renderFontPanel(); }
+    };
+    const ex = $('sfExport'); if (ex) ex.onclick = () => { saveGlyph(true); const data = new TextEncoder().encode(JSON.stringify({ app: 'stitch-studio-font', v: 1, font: f }, roundJSON)); saveFile(`${f.name.replace(/[^\w\- ]+/g, '').replace(/\s+/g, '-') || 'font'}.ssfont.json`, data); };
+    const ib = $('sfImportBtn'); if (ib) ib.onclick = () => $('sfImport').click();
+    $('sfImport').onchange = async (e) => {
+      const file = e.target.files[0]; e.target.value = ''; if (!file) return;
+      try {
+        const d = JSON.parse(await file.text());
+        if (!d || d.app !== 'stitch-studio-font' || !d.font || !d.font.glyphs) throw new Error();
+        const nf = d.font;
+        if (sfontById(nf.id)) nf.id = 'sf' + Date.now().toString(36);
+        sfonts.push(nf); saveFonts(true);
+        saveGlyph(true); fontWs.fontId = nf.id; fontWs.newOpen = false; openGlyph(firstGlyph());
+        toast(`Imported “${nf.name}”.`);
+      } catch (er) { toast('That file is not a digitized font.'); }
+    };
+    if ($('sfCreate')) {
+      const b = $('sfBold'), it = $('sfItal');
+      b.onclick = () => b.setAttribute('aria-pressed', b.getAttribute('aria-pressed') !== 'true');
+      it.onclick = () => it.setAttribute('aria-pressed', it.getAttribute('aria-pressed') !== 'true');
+      $('sfCreate').onclick = async () => {
+        const name = ($('sfName').value || '').trim() || 'My font';
+        const cap = Math.max(5, Math.min(80, +$('sfCap').value || 25));
+        setBusy(true);
+        try {
+          saveGlyph(true);
+          const nf = await createStitchFont({ name, font: $('sfSrc').value, bold: b.getAttribute('aria-pressed') === 'true', italic: it.getAttribute('aria-pressed') === 'true', cap });
+          fontWs.fontId = nf.id; fontWs.newOpen = false;
+          openGlyph(firstGlyph());
+        } finally { setBusy(false); }
+      };
+    }
+    const adv = $('sfAdv'); if (adv) adv.onchange = () => { const v = +adv.value; if (v > 0) { g.adv = v; saveFonts(); draw(); } };
+  }
+
   /* ---------------- boot ---------------- */
   try { const m = localStorage.getItem('ss-machine'); if (m) ui.machine = m; } catch (e) { }
   loadSetup();
   addSteppers();
+  $('modeSeg').querySelectorAll('button').forEach((b) => b.onclick = () => setMode(b.dataset.mode));
   readTheme();
   if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { readTheme(); draw(); });
   new MutationObserver(() => { readTheme(); draw(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });

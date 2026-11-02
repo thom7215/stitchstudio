@@ -299,3 +299,17 @@ li.drop-after { box-shadow: inset 0 -3px 0 var(--accent); }
 .dsize input { width: 68px; padding: 3px 6px; font: 500 13px var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
 .dsize .lock { padding: 2px 5px; font-size: 12px; }
 .statsrest { display: contents; }
+
+/* Stitch Studio / Font Studio switch */
+.modeseg button { padding: 5px 12px; font-size: 13px; }
+body:not(.fontmode) #fontPanel { display: none; }
+body.fontmode #leftTabs, body.fontmode [data-ltab], body.fontmode .steps, body.fontmode #exportBtn, body.fontmode #saveBtn, body.fontmode #openBtn, body.fontmode #projName { display: none !important; }
+.fontpanel { display: flex; flex-direction: column; gap: 8px; }
+.fontpanel select, .fontpanel input[type=text] { width: 100%; }
+.fontpanel .newfont { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--bg); }
+.fontpanel .status { margin: 0; font-size: 12px; color: var(--muted); }
+.glyphgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(30px, 1fr)); gap: 4px; }
+.glyphgrid button { height: 32px; padding: 0; font: 600 15px var(--body); background: var(--panel); position: relative; }
+.glyphgrid button.done { background: var(--good-soft); border-color: var(--good); }
+.glyphgrid button[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+.fontlist .sfont small::after { content: ' · digitized'; color: var(--accent); }

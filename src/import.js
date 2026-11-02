@@ -419,6 +419,13 @@ const Importer = (() => {
     for (let i = 0; i < out.length; i++) if (depth(i) % 2 === 1) glyph[i] = glyph[outerOf(i)];
     out.glyph = glyph;
     out.chars = placed.map((g) => g.ch);
+    // layout in mm (for building digitized fonts): where each character sits, its width, and the font's
+    // proportions, all scaled so the capital height equals t.height
+    const u = (t.height || 10) / capH;
+    out.unit = u;
+    out.placed = placed.map((g) => ({ ch: g.ch, x: (g.px != null ? g.px : g.cx - g.w / 2) * u, base: (g.py != null ? g.py : g.cy + capH / 2) * u, adv: (g.w + spacingPx) * u }));
+    const m = (ch) => { const k = ctx.measureText(ch); return { asc: (k.actualBoundingBoxAscent || 0) * u, desc: (k.actualBoundingBoxDescent || 0) * u, w: k.width * u }; };
+    out.metrics = { cap: t.height || 10, xh: m('x').asc, desc: m('gjpqy').desc, space: m(' ').w, lineH: lineH * u };
     return out;
   }
 

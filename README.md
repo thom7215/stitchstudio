@@ -19,6 +19,7 @@ Or open `index.html` (also in `dist/`) in Chrome, Edge, Firefox or Safari. It is
 - **Hoops:** realistic frames for Brother / Baby Lock, Janome / Elna, Husqvarna Viking, Pfaff, Bernina, Bernette and multi-needle machines.
 - **Machine files:** PES (Brother, Baby Lock, Bernette), JEF (Janome, Elna), EXP (Bernina), VP3 (Viking, Pfaff), DST (Tajima and most commercial machines).
 - **Projects:** save and reopen your work as a `.json` project.
+- **Font Studio:** digitize a whole font once. Pick a font on your computer and every capital, lowercase letter and number is traced; open each character and draw its rails and rungs (or pick any stitch type). Fonts are kept in the browser and can be exported/imported as `.ssfont.json` files. Back in Stitch Studio, digitized fonts appear at the top of the Text tab's font list, and typed letters are built from your digitized characters.
 
 ## Project layout
 
