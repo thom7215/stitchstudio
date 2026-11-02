@@ -7458,6 +7458,12 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   const FONT_KEY = 'ss-fonts';
   let sfonts = [];
   try { sfonts = JSON.parse(localStorage.getItem(FONT_KEY) || '[]'); if (!Array.isArray(sfonts)) sfonts = []; } catch (e) { sfonts = []; }
+  // fonts save in the background after every change; anything still waiting is written straight away
+  // if the page is closed, reloaded or put in the background
+  const flushFonts = () => { if (fontSaveTimer) { if (ui.mode === 'font') saveGlyph(true); else saveFonts(true); } };
+  window.addEventListener('pagehide', flushFonts);
+  window.addEventListener('beforeunload', flushFonts);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushFonts(); });
   function isSfont(f) { return typeof f === 'string' && f.startsWith('sfont:'); }
   function sfontById(id) { return sfonts.find((f) => f.id === id) || null; }
   const roundJSON = (k, v) => (typeof v === 'number' ? Math.round(v * 1000) / 1000 : v);
@@ -7468,7 +7474,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       try { localStorage.setItem(FONT_KEY, JSON.stringify(sfonts, roundJSON)); }
       catch (e) { toast('This browser has no room left for more fonts. Export them to files to keep them safe.', 6000); }
     };
-    if (now) go(); else fontSaveTimer = setTimeout(go, 500);
+    if (now) { fontSaveTimer = null; go(); } else fontSaveTimer = setTimeout(() => { fontSaveTimer = null; go(); }, 400);
   }
   // what is kept of a shape inside a font
   function glyphObj(o, dx, dy) {
@@ -7649,8 +7655,21 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const all = [...new Set([...fonts.added, ...fonts.local, ...fonts.web])];
     return all.map((n) => `<option value="${esc(n)}" ${n === sel ? 'selected' : ''}>${esc(n)}</option>`).join('');
   }
+  // A font named "<another font> stitch" got that name by default, not by choice (the name used to stay on
+  // the font first shown when a different one was picked to trace from): name it after the font it was traced from
+  function fixDefaultFontNames() {
+    const known = new Set([...fonts.web, ...fonts.local, ...fonts.added, 'sans-serif', 'serif', 'monospace']);
+    let changed = false;
+    for (const f of sfonts) {
+      const m = /^(.*) stitch$/.exec(f.name || '');
+      const want = `${f.source && f.source.font} stitch`;
+      if (m && f.source && f.source.font && f.name !== want && known.has(m[1])) { f.name = want; changed = true; }
+    }
+    if (changed) saveFonts(true);
+  }
   function renderFontPanel() {
     const box = $('fontPanel'); if (!box) return;
+    fixDefaultFontNames();
     const f = curFont();
     const g = f && fontWs.ch ? f.glyphs[fontWs.ch] : null;
     const srcDefault = !isSfont(ui.font) && ui.font ? ui.font : pickDefaultFont();
@@ -7669,7 +7688,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       </div>` : `<div class="row"><button type="button" class="small ghost" id="sfImportBtn">Import file</button></div>`}
       <input type="file" id="sfImport" accept=".json,application/json" hidden>
       ${fontWs.newOpen || !sfonts.length ? `<div class="newfont">
-        <label for="sfName" class="lbl">Name</label><input type="text" id="sfName" value="${esc(srcDefault)} stitch" maxlength="40">
+        <label for="sfName" class="lbl">Name</label><input type="text" id="sfName" value="${esc(srcDefault)} stitch" maxlength="40" data-auto="1">
         <label for="sfSrc" class="lbl">Traced from</label><select id="sfSrc">${sourceFontOptions(srcDefault)}</select>
         <div class="row"><button type="button" class="toggle small" id="sfBold" aria-pressed="false"><b>Bold</b></button><button type="button" class="toggle small" id="sfItal" aria-pressed="false"><i>Italic</i></button></div>
         <div class="field"><label for="sfCap">Capital height</label><input type="number" id="sfCap" min="5" max="80" step="1" value="25"><output>mm</output></div>
@@ -7679,7 +7698,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       <div class="glyphgrid" id="sfGlyphs"></div>
       <p class="status" id="sfCount"></p>
       ${g ? `<div class="field"><label for="sfAdv">Width of ${esc(fontWs.ch)}</label><input type="number" id="sfAdv" min="0.5" step="0.1" value="${g.adv.toFixed(1)}"><output>mm</output></div>` : ''}
-      <p class="status">Digitized at ${f.cap} mm capital height</p>` : ''}`;
+      <p class="status">Traced from ${esc(f.source.font)}${f.source.bold ? ' Bold' : ''}${f.source.italic ? ' Italic' : ''} · ${f.cap} mm capital height</p>` : ''}`;
     renderGlyphGrid();
     const sel = $('sfSel'); if (sel) sel.onchange = () => { saveGlyph(true); fontWs.fontId = sel.value; fontWs.newOpen = false; openGlyph(firstGlyph()); };
     const nb = $('sfNewBtn'); if (nb) nb.onclick = () => { fontWs.newOpen = !fontWs.newOpen; renderFontPanel(); };
@@ -7708,8 +7727,11 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       const b = $('sfBold'), it = $('sfItal');
       b.onclick = () => b.setAttribute('aria-pressed', b.getAttribute('aria-pressed') !== 'true');
       it.onclick = () => it.setAttribute('aria-pressed', it.getAttribute('aria-pressed') !== 'true');
+      const nameBox = $('sfName');
+      nameBox.oninput = () => { nameBox.dataset.auto = nameBox.value.trim() ? '0' : '1'; };
+      $('sfSrc').onchange = () => { if (nameBox.dataset.auto === '1') nameBox.value = `${$('sfSrc').value} stitch`; };
       $('sfCreate').onclick = async () => {
-        const name = ($('sfName').value || '').trim() || 'My font';
+        const name = (nameBox.dataset.auto === '1' ? `${$('sfSrc').value} stitch` : (nameBox.value || '').trim()) || `${$('sfSrc').value} stitch`;
         const cap = Math.max(5, Math.min(80, +$('sfCap').value || 25));
         setBusy(true);
         try {
