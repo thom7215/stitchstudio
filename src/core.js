@@ -1526,7 +1526,45 @@ const Core = (() => {
     return best;
   }
   /* walk along the shape outline from p to q (the shorter way round) */
-  function edgePath(rings, p, q, tol = 2.5, hop = 0) {
+  /* Lines a traced rail should not run back over: the rail's own earlier part, and (for the second rail of
+     a column) the first rail. A grid of segments, so "how much of this path lies on them" is quick. */
+  function avoidIndex(cell = 0.6) {
+    const grid = new Map();
+    const key = (cx, cy) => cx * 73856093 ^ cy * 19349663;
+    const add = (a, b) => {
+      const x0 = Math.floor(Math.min(a[0], b[0]) / cell), x1 = Math.floor(Math.max(a[0], b[0]) / cell);
+      const y0 = Math.floor(Math.min(a[1], b[1]) / cell), y1 = Math.floor(Math.max(a[1], b[1]) / cell);
+      if ((x1 - x0 + 1) * (y1 - y0 + 1) > 4000) return;
+      for (let cx = x0; cx <= x1; cx++) for (let cy = y0; cy <= y1; cy++) {
+        const k = key(cx, cy); let l = grid.get(k); if (!l) grid.set(k, l = []); l.push(a, b);
+      }
+    };
+    const addLine = (P) => { for (let i = 1; i < P.length; i++) add(P[i - 1], P[i]); };
+    const near = (q, r) => {
+      const l = grid.get(key(Math.floor(q[0] / cell), Math.floor(q[1] / cell)));
+      if (!l) return false;
+      for (let i = 0; i < l.length; i += 2) if (segDist(q[0], q[1], l[i][0], l[i][1], l[i + 1][0], l[i + 1][1]) < r) return true;
+      return false;
+    };
+    // length of a path that runs along the lines (ignoring the bit right next to its two ends,
+    // which may sit on a rail on purpose)
+    const overlap = (P, skip = 0.8) => {
+      if (!grid.size || P.length < 2) return 0;
+      const s0 = P[0], s1 = P[P.length - 1];
+      let len = 0;
+      for (let i = 1; i < P.length; i++) {
+        const a = P[i - 1], b = P[i], L = dist(a, b), n = Math.max(1, Math.ceil(L / 0.3));
+        for (let k = 0; k < n; k++) {
+          const q = lerp(a, b, (k + 0.5) / n);
+          if (dist(q, s0) < skip || dist(q, s1) < skip) continue;
+          if (near(q, 0.3)) len += L / n;
+        }
+      }
+      return len;
+    };
+    return { add, addLine, overlap, get size() { return grid.size; } };
+  }
+  function edgePath(rings, p, q, tol = 2.5, hop = 0, avoid = null) {
     const P = nearestOnRings(rings, p);
     if (!(P.d <= tol)) return [p, q];
     let Q = nearestOnRings(rings, q, P.ri);
@@ -1535,7 +1573,7 @@ const Core = (() => {
     const Qany = nearestOnRings(rings, q);
     if (!hop && Qany.ri !== P.ri && Qany.d <= tol && Qany.d + 0.05 < Q.d) {
       const J = nearestOnRings(rings, p, Qany.ri);
-      const along = edgePath(rings, J.pt, q, tol, 1);
+      const along = edgePath(rings, J.pt, q, tol, 1, avoid);
       return [p].concat(along);
     }
     if (!(Q.d <= tol)) return [p, q];
@@ -1557,7 +1595,10 @@ const Core = (() => {
       if (back.length && back[back.length - 1] !== r[(Q.ei + 1) % n]) back.push(r[(Q.ei + 1) % n]);
       back.push(Q.pt);
     }
-    return pathLength(fwd, false) <= pathLength(back, false) ? fwd : back;
+    // the shorter way round, unless it runs back over a rail already traced
+    let lf = pathLength(fwd, false), lb = pathLength(back, false);
+    if (avoid && avoid.size) { lf += 20 * avoid.overlap(fwd); lb += 20 * avoid.overlap(back); }
+    return lf <= lb ? fwd : back;
   }
   function snapToEdge(rings, p, tol) {
     const P = nearestOnRings(rings, p);
@@ -1589,19 +1630,23 @@ const Core = (() => {
     return out;
   }
   /* rail = { pts: [clicked points], modes: [one per segment: 'edge' | 'curve' | 'line'], closed, handles } */
-  function railDense(rail, rings) {
+  // `others`: lines (such as the first rail of a column) that edge-following parts should not run over
+  function railDense(rail, rings, others) {
     const pts = rail.pts || [];
     if (pts.length < 2) return pts.slice();
     const closed = !!rail.closed && pts.length >= 3;
-    const cm = catmull(pts, closed);
-    const marks = cm.marks;
     const segN = closed ? pts.length : pts.length - 1;
     const out = [pts[0]];
+    // the rail's own earlier part and the other lines: a shape-edge part never runs back over them
+    const avoid = avoidIndex();
+    for (const P of others || []) if (P && P.length > 1) avoid.addLine(P);
+    let added = 0;
     for (let i = 0; i < segN; i++) {
       const a = pts[i], b = pts[(i + 1) % pts.length];
       const mode = (rail.modes && rail.modes[i]) || 'curve';
       let seg;
-      if (mode === 'edge') seg = edgePath(rings, a, b);
+      for (; added + 1 < out.length; added++) avoid.add(out[added], out[added + 1]);
+      if (mode === 'edge') seg = edgePath(rings, a, b, 2.5, 0, avoid);
       else if (mode === 'line') seg = [a, b];
       else {
         const ha = nodeHandles(rail, i), hb = nodeHandles(rail, (i + 1) % pts.length);
@@ -1641,7 +1686,7 @@ const Core = (() => {
   }
   /* resolve a column into matched rails and rung positions */
   function columnLayout(rings, col) {
-    let A = railDense(col.A, rings), B = railDense(col.B, rings);
+    let A = railDense(col.A, rings), B = railDense(col.B, rings, [A]);
     if (A.length < 2 || B.length < 2) return null;
     const closed = !!(col.A.closed && col.B.closed && A.length >= 3 && B.length >= 3);
     if (!closed) {

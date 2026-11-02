@@ -1533,10 +1533,12 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       const on = a && a.ci === ci;
       if (!pv) {
         // unfinished column: show its rails and dots so they can be edited
+        let firstDense = null;
         for (const rail of ['A', 'B']) {
           const r = col[rail];
           if (r.pts.length >= 2) {
-            let dense = r.pts; try { dense = Core.railDense(r, o.rings); } catch (e) { }
+            let dense = r.pts; try { dense = Core.railDense(r, o.rings, rail === 'B' && firstDense ? [firstDense] : null); } catch (e) { }
+            if (rail === 'A') firstDense = dense;
             const p = line(dense, r.closed);
             ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 5 * px; ctx.stroke(p);
             ctx.setLineDash([6 * px, 4 * px]); ctx.strokeStyle = RAIL; ctx.lineWidth = 2.2 * px; ctx.stroke(p); ctx.setLineDash([]);
@@ -1642,7 +1644,10 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         if (live) { pts.push(ui.snap || ui.cursor); modes.push(ui.railMode); }
         modes.length = Math.max(0, (r.closed ? pts.length : pts.length - 1));
         let dense = pts;
-        try { dense = Core.railDense({ pts, modes, closed: r.closed }, o.rings); } catch (e) { }
+        // the second rail keeps off the first, as the finished column will
+        let others = null;
+        if (k === 'B' && d.A.pts.length >= 2) { try { others = [Core.railDense(d.A, o.rings)]; } catch (e) { } }
+        try { dense = Core.railDense({ pts, modes, closed: r.closed }, o.rings, others); } catch (e) { }
         const p = line(dense, r.closed);
         ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 5 * px; ctx.stroke(p);
         const ink = d.border ? '#0b8f8f' : RAIL;
