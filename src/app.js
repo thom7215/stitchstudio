@@ -1730,6 +1730,14 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         }
         return;
       }
+      // the selected column: a bright band between its rails and a glow along them
+      if (on) {
+        const band = new Path2D();
+        if (pv.closed) { pv.A.forEach((q, i) => i ? band.lineTo(q[0], q[1]) : band.moveTo(q[0], q[1])); band.closePath(); pv.B.forEach((q, i) => i ? band.lineTo(q[0], q[1]) : band.moveTo(q[0], q[1])); band.closePath(); }
+        else { pv.A.forEach((q, i) => i ? band.lineTo(q[0], q[1]) : band.moveTo(q[0], q[1])); for (let i = pv.B.length - 1; i >= 0; i--) band.lineTo(pv.B[i][0], pv.B[i][1]); band.closePath(); }
+        ctx.fillStyle = 'rgba(255, 196, 0, 0.42)'; ctx.fill(band, 'evenodd');
+        for (const P of [pv.A, pv.B]) { ctx.strokeStyle = 'rgba(255, 176, 0, 0.75)'; ctx.lineWidth = 11 * px; ctx.stroke(line(P, pv.closed)); }
+      }
       // stitch direction preview
       ctx.strokeStyle = on ? 'rgba(35,80,212,0.55)' : 'rgba(35,80,212,0.35)'; ctx.lineWidth = 1 * px;
       ctx.beginPath(); for (const [p, q] of pv.dirs) { ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); } ctx.stroke();
@@ -1737,8 +1745,8 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       for (const P of [pv.A, pv.B]) {
         const p = line(P, pv.closed);
         ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 5 * px; ctx.stroke(p);
-        ctx.strokeStyle = RAIL; ctx.lineWidth = (on ? 3 : 2.2) * px; ctx.stroke(p);
-        railArrows(P, pv.closed, back, px, RAIL);
+        ctx.strokeStyle = on ? '#06612f' : RAIL; ctx.lineWidth = (on ? 3.4 : 2.2) * px; ctx.stroke(p);
+        railArrows(P, pv.closed, back, px, on ? '#06612f' : RAIL);
       }
       if (pv.start) {
         // best sew order may sew a column from its end: show where it really starts (green) and ends (red)
@@ -1748,13 +1756,8 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
           ctx.strokeStyle = '#fff'; ctx.lineWidth = 6 * px; ctx.beginPath(); ctx.moveTo(seg[0][0], seg[0][1]); ctx.lineTo(seg[1][0], seg[1][1]); ctx.stroke();
           ctx.strokeStyle = c; ctx.lineWidth = 3.4 * px; ctx.stroke();
         }
-        // the number sits just past the start of the column, clear of the rail dots; drawn last, on top
-        const m = Core.lerp(sSeg[0], sSeg[1], 0.5);
-        const atEnd = pq && pq.rev, nA = pv.A.length, nB = pv.B.length, kk = Math.min(6, nA - 1, nB - 1);
-        const inner = kk > 0 ? Core.lerp(pv.A[atEnd ? nA - 1 - kk : kk], pv.B[atEnd ? nB - 1 - kk : kk], 0.5) : m;
-        let dx = m[0] - inner[0], dy = m[1] - inner[1], L = Math.hypot(dx, dy);
-        if (pv.closed || L < 1e-6) { dx = 0; dy = -1; L = 1; }
-        badges.push({ m, at: [m[0] + dx / L * 15 * px, m[1] + dy / L * 15 * px], n: colNo(o, ci), on });
+        // the number sits inside its own column, on the centre line a little way in from where it starts
+        badges.push({ pv, from: pq && pq.rev ? 1 : 0, n: colNo(o, ci), on });
       }
       // rungs
       pv.rungs.forEach((r, ri) => {
@@ -1871,10 +1874,36 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       ctx.strokeStyle = '#e8730c'; ctx.lineWidth = 2.5 * px;
       ctx.beginPath(); ctx.moveTo(dragState.a[0], dragState.a[1]); ctx.lineTo(dragState.b[0], dragState.b[1]); ctx.stroke();
     }
-    // column numbers, on top of everything
+    // column numbers, on top of everything, kept clear of rail dots, rung ends and each other
+    const atFrac = (P, f) => {
+      let T = 0; for (let i = 1; i < P.length; i++) T += Core.dist(P[i - 1], P[i]);
+      let goal = T * f, acc = 0;
+      for (let i = 1; i < P.length; i++) { const d = Core.dist(P[i - 1], P[i]); if (acc + d >= goal) { const t = d ? (goal - acc) / d : 0; return [P[i - 1][0] + (P[i][0] - P[i - 1][0]) * t, P[i - 1][1] + (P[i][1] - P[i - 1][1]) * t]; } acc += d; }
+      return P[P.length - 1].slice();
+    };
+    const lenOf = (P) => { let T = 0; for (let i = 1; i < P.length; i++) T += Core.dist(P[i - 1], P[i]); return T; };
+    const blockers = [];
+    for (const c of o.columns || []) { for (const k of ['A', 'B']) blockers.push(...c[k].pts); for (const r of c.rungs || []) blockers.push(r.a, r.b); }
+    const placed = [];
+    for (const b of badges) {
+      const pv = b.pv, L = (lenOf(pv.A) + lenOf(pv.B)) / 2 || 1;
+      const R = (b.on ? 10.5 : 9.5) * px, clear = R + 5 * px;
+      let best = null, bestScore = -Infinity;
+      for (let k = 0; k <= 12; k++) {
+        const d = 22 * px + k * 7 * px; // distance in from the start, on screen
+        let f = Math.min(0.5, d / L); if (b.from) f = 1 - f;
+        const q = Core.lerp(atFrac(pv.A, f), atFrac(pv.B, f), 0.5);
+        let near = Infinity;
+        for (const z of blockers) near = Math.min(near, Core.dist(q, z));
+        for (const z of placed) near = Math.min(near, Core.dist(q, z) - R);
+        const score = Math.min(near, clear) * 10 - k; // first spot that is clear wins; otherwise the clearest
+        if (score > bestScore) { bestScore = score; best = q; }
+        if (near >= clear) break;
+      }
+      b.at = best; placed.push(best);
+    }
     for (const b of badges) {
       const R = (b.on ? 10.5 : 9.5) * px;
-      ctx.strokeStyle = '#0f9d58'; ctx.lineWidth = 1.6 * px; ctx.beginPath(); ctx.moveTo(b.m[0], b.m[1]); ctx.lineTo(b.at[0], b.at[1]); ctx.stroke();
       ctx.save();
       ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 4; ctx.shadowOffsetY = 1;
       ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(b.at[0], b.at[1], R + 2 * px, 0, Math.PI * 2); ctx.fill();
