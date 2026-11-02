@@ -400,13 +400,13 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       str: $('txt').value.replace(/\s+$/, ''),
       font: ui.font || 'sans-serif', bold: ui.bold, italic: ui.italic,
       height: formHeight(), spacing: +$('txtSp').value, curve: +$('txtCv').value,
-      lineSpacing: +$('txtLs').value, align: ui.align || 'center',
+      lineSpacing: +$('txtLs').value, align: ui.align || 'center', trim: $('txtTrim').checked,
     };
   }
   function writeTextForm(t) {
     $('txt').value = t.str; ui.font = t.font; ui.bold = t.bold; ui.italic = t.italic;
     setTxtH(t.height); $('txtSp').value = t.spacing; $('txtCv').value = t.curve;
-    $('txtLs').value = t.lineSpacing || 1; ui.align = t.align || 'center';
+    $('txtLs').value = t.lineSpacing || 1; ui.align = t.align || 'center'; $('txtTrim').checked = t.trim !== false;
     syncTextUI();
     renderFontList();
   }
@@ -415,6 +415,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     // a digitized font has its own weight and slant
     const sfSel = isSfont(ui.font);
     $('boldBtn').disabled = sfSel; $('italBtn').disabled = sfSel;
+    $('txtTrimRow').hidden = !sfSel;
     $('txtHo').textContent = formHeight().toFixed(1).replace(/\.0$/, '') + ' mm';
     $('txtSpo').textContent = $('txtSp').value;
     const ls = +$('txtLs').value;
@@ -684,12 +685,16 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     results = S.objects.map((o, i) => {
       live.add(o.id);
       let occ = [];
-      if (S.knockout && o.type !== 'skip' && o.type !== 'running' && o.kind === 'area') {
+      // a letter of a digitized-font word: the letters after it trim it where they overlap (its own setting)
+      const sfWord = o.text && o.text.sfont && o.group ? o.group : null, trimWord = sfWord && o.text.trim !== false;
+      if ((S.knockout || trimWord) && o.type !== 'skip' && o.type !== 'running' && o.kind === 'area') {
         const b = boxes[i];
         for (let j = i + 1; j < S.objects.length; j++) {
           const q = S.objects[j], c = boxes[j];
           if (q.kind !== 'area' || q.type === 'skip' || q.type === 'running') continue;
           if (c.x0 > b.x1 || c.x1 < b.x0 || c.y0 > b.y1 || c.y1 < b.y0) continue;
+          const sameWord = sfWord && q.group === sfWord;
+          if (sameWord ? !trimWord : !S.knockout) continue;
           occ.push(q);
         }
       }
@@ -3790,6 +3795,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   $('txt').oninput = () => { liveText(); clearTimeout(renderFontList.t); renderFontList.t = setTimeout(renderFontList, 250); };
   ['txtH', 'txtSp', 'txtCv', 'txtLs'].forEach((id) => $(id).oninput = liveText);
   $('txtAlign').querySelectorAll('button').forEach((b) => b.onclick = () => { ui.align = b.dataset.align; liveText(); });
+  $('txtTrim').onchange = () => liveText();
   $('txtColor').oninput = () => { const o = ui.editingText && objById(ui.editingText); if (o) { for (const m of wordOf(o)) { m.color = normHex($('txtColor').value); m.ver = VER++; } draw(); renderLayers(); scheduleGen(); } };
   $('txtColor').onchange = () => { if (ui.editingText) { checkpoint(); changed(); } };
   $('addTextBtn').onclick = addOrUpdateText;

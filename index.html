@@ -425,6 +425,7 @@ body.fontmode #leftTabs, body.fontmode [data-ltab], body.fontmode .steps, body.f
         <div class="field"><label for="txtSp">Letter spacing</label><input id="txtSp" type="range" min="-10" max="40" step="1" value="0"><output id="txtSpo">0</output></div>
         <div class="field"><label for="txtLs">Line spacing</label><input id="txtLs" type="range" min="0.6" max="2.5" step="0.05" value="1"><output id="txtLso">Normal</output></div>
         <div class="field"><span class="lbl-inline">Lines</span><div class="seg" id="txtAlign" role="group" aria-label="Line alignment"><button type="button" data-align="left" aria-pressed="false">Left</button><button type="button" data-align="center" aria-pressed="true">Center</button><button type="button" data-align="right" aria-pressed="false">Right</button></div></div>
+        <label class="check" id="txtTrimRow" hidden title="In a script word the letters often run into each other. Each letter leaves out the part that lies under the letter after it, so the satin is never two layers thick there."><input type="checkbox" id="txtTrim" checked> Trim where letters overlap</label>
         <div class="field"><label for="txtCv">Curve</label><input id="txtCv" type="range" min="-100" max="100" step="1" value="0"><output id="txtCvo">Straight</output></div>
         <button id="addTextBtn" class="primary wide">Add text to hoop</button>
         <p class="hint" id="textHint">Letters under 5 mm tall are hard to stitch cleanly.</p>
@@ -2600,26 +2601,69 @@ const Core = (() => {
     return best;
   }
   const flipRung = (r) => { const q = [r[1], r[0]]; q.cutA = r.cutB; q.cutB = r.cutA; return q; };
-  function genColumns(rings, cols, p, warn, start) {
+  /* The parts of hand-drawn columns that lie under a shape sewn later (the next letter of a script word that
+     runs into this one) are left out: each rung is trimmed to the part that is not covered, keeping a slight
+     overlap under the covering shape so no fabric shows where they meet. */
+  function occTester(occ, keep) {
+    if (!occ || !occ.length) return null;
+    const all = occ.flat();
+    if (!all.length) return null;
+    const bb = bbox(all);
+    let r = 0.06;
+    while ((bb.w / r + 8) * (bb.h / r + 8) > 3e6) r *= 1.25;
+    const W = Math.ceil(bb.w / r) + 8, H = Math.ceil(bb.h / r) + 8, ox = bb.x0 - 4 * r, oy = bb.y0 - 4 * r;
+    const mask = new Uint8Array(W * H);
+    for (const o of occ) { const m = rasterize(o, ox, oy, r, W, H); for (let i = 0; i < m.length; i++) mask[i] |= m[i]; }
+    const d = chamfer(mask, W, H), lim = keep / r;
+    return (x, y) => { const c = Math.floor((x - ox) / r), rr = Math.floor((y - oy) / r); return c >= 0 && rr >= 0 && c < W && rr < H && d[rr * W + c] > lim; };
+  }
+  function clipRungsUnder(rungs, covered, closed) {
+    if (!covered) return [{ rungs, closed }];
+    const n = rungs.length, part = [];
+    for (const r of rungs) {
+      const L = dist(r[0], r[1]), m = Math.max(2, Math.ceil(L / 0.08));
+      let best = null, run = -1;
+      for (let i = 0; i <= m + 1; i++) {
+        const free = i <= m && (() => { const q = lerp(r[0], r[1], i / m); return !covered(q[0], q[1]); })();
+        if (free && run < 0) run = i;
+        if (!free && run >= 0) { if (!best || i - 1 - run > best[1] - best[0]) best = [run, i - 1]; run = -1; }
+      }
+      part.push(!best || (best[1] - best[0]) / m < 0.15 ? null : best[0] === 0 && best[1] === m ? r : (() => { const q = [lerp(r[0], r[1], best[0] / m), lerp(r[0], r[1], best[1] / m)]; q.cutA = best[0] > 0; q.cutB = best[1] < m; return q; })());
+    }
+    if (part.every((q, i) => q === rungs[i])) return [{ rungs, closed }];
+    const pieces = []; let cur = [];
+    const mid = (q) => lerp(q[0], q[1], 0.5);
+    for (let i = 0; i < n; i++) { if (part[i]) cur.push(part[i]); else { if (cur.length >= 2) pieces.push(cur); cur = []; } }
+    if (cur.length >= 2) pieces.push(cur);
+    // a loop that was cut: its last piece runs on into the first
+    if (closed && part[0] && part[n - 1] && pieces.length > 1) { const last = pieces.pop(); pieces[0] = last.concat(pieces[0]); }
+    return pieces.filter((pc) => { let L = 0; for (let i = 1; i < pc.length; i++) L += dist(mid(pc[i - 1]), mid(pc[i])); return L >= 0.6; }).map((pc) => ({ rungs: pc, closed: false }));
+  }
+  function genColumns(rings, cols, p, warn, start, occ) {
     const step = p.spacing / 2 / 4;
     let ignored = false, wide = false;
     const items = [];
+    const covered = testOpts.noColumnKnockout ? null : occTester(occ, 0.3);
     cols.forEach((col, ci) => {
       const lay = columnLayout(rings, col);
       if (!lay) return;
       if (lay.rungs.some((r) => r.ignored)) ignored = true;
-      const base = columnRungs(lay, step);
-      if (base.length < 2) return;
-      if (base.some(([a, b]) => dist(a, b) > 7.5)) wide = true;
-      const opts = [];
-      const variants = p.autoOrder ? [[false, false], [false, true], ...(lay.closed ? [] : [[true, false], [true, true]])] : [[false, false]];
-      for (const [rev, swap] of variants) {
-        let rungs = rev ? base.slice().reverse() : base;
-        if (rev !== swap) rungs = rungs.map(flipRung);
-        const out = satinFromRungs(rungs, { maxLen: p.maxLen, pull: p.pull, underlay: p.underlay !== 'none' && rungs.length > 6, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, closed: lay.closed, endForward: true });
-        if (out.length) opts.push({ rev, swap, out, s: out[0], e: out[out.length - 1] });
+      const base0 = columnRungs(lay, step);
+      if (base0.length < 2) return;
+      if (base0.some(([a, b]) => dist(a, b) > 7.5)) wide = true;
+      for (const piece of clipRungsUnder(base0, covered, lay.closed)) {
+        const base = piece.rungs;
+        if (base.length < 2) continue;
+        const opts = [];
+        const variants = p.autoOrder ? [[false, false], [false, true], ...(piece.closed ? [] : [[true, false], [true, true]])] : [[false, false]];
+        for (const [rev, swap] of variants) {
+          let rungs = rev ? base.slice().reverse() : base;
+          if (rev !== swap) rungs = rungs.map(flipRung);
+          const out = satinFromRungs(rungs, { maxLen: p.maxLen, pull: p.pull, underlay: p.underlay !== 'none' && rungs.length > 6, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, closed: piece.closed, endForward: true });
+          if (out.length) opts.push({ rev, swap, out, s: out[0], e: out[out.length - 1] });
+        }
+        if (opts.length) items.push({ ci, opts });
       }
-      if (opts.length) items.push({ ci, opts });
     });
     if (!(p.maxLen > 100) && warn && wide) warn('Satin stitches wider than 7.5 mm are split in two.');
     if (ignored && warn) warn('A rung crosses another rung or sits past the end of a rail, so it is ignored.');
@@ -2861,7 +2905,7 @@ const Core = (() => {
       else if (o.type === 'satin') {
         const dir = o.params.satinDir;
         if (dir === 'angle') segs = genSatinAngle(o.rings, occ, { ...P, angle: o.params.satinAngle ?? 0 }, start);
-        else if (dir === 'columns' && o.columns && o.columns.length) { segs = genColumns(o.rings, o.columns, P, addWarn, start); colPlan = segs.plan; }
+        else if (dir === 'columns' && o.columns && o.columns.length) { segs = genColumns(o.rings, o.columns, P, addWarn, start, occ); colPlan = segs.plan; }
         else if (dir === 'guides' && o.guides && o.guides.length) segs = genSatinGuides(o.rings, occ, o.guides, o.dirs || [], P, addWarn);
         else if (dir === 'columns') {
           addWarn('No columns yet, so nothing is stitched on this shape.');
@@ -4318,13 +4362,13 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       str: $('txt').value.replace(/\s+$/, ''),
       font: ui.font || 'sans-serif', bold: ui.bold, italic: ui.italic,
       height: formHeight(), spacing: +$('txtSp').value, curve: +$('txtCv').value,
-      lineSpacing: +$('txtLs').value, align: ui.align || 'center',
+      lineSpacing: +$('txtLs').value, align: ui.align || 'center', trim: $('txtTrim').checked,
     };
   }
   function writeTextForm(t) {
     $('txt').value = t.str; ui.font = t.font; ui.bold = t.bold; ui.italic = t.italic;
     setTxtH(t.height); $('txtSp').value = t.spacing; $('txtCv').value = t.curve;
-    $('txtLs').value = t.lineSpacing || 1; ui.align = t.align || 'center';
+    $('txtLs').value = t.lineSpacing || 1; ui.align = t.align || 'center'; $('txtTrim').checked = t.trim !== false;
     syncTextUI();
     renderFontList();
   }
@@ -4333,6 +4377,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     // a digitized font has its own weight and slant
     const sfSel = isSfont(ui.font);
     $('boldBtn').disabled = sfSel; $('italBtn').disabled = sfSel;
+    $('txtTrimRow').hidden = !sfSel;
     $('txtHo').textContent = formHeight().toFixed(1).replace(/\.0$/, '') + ' mm';
     $('txtSpo').textContent = $('txtSp').value;
     const ls = +$('txtLs').value;
@@ -4602,12 +4647,16 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     results = S.objects.map((o, i) => {
       live.add(o.id);
       let occ = [];
-      if (S.knockout && o.type !== 'skip' && o.type !== 'running' && o.kind === 'area') {
+      // a letter of a digitized-font word: the letters after it trim it where they overlap (its own setting)
+      const sfWord = o.text && o.text.sfont && o.group ? o.group : null, trimWord = sfWord && o.text.trim !== false;
+      if ((S.knockout || trimWord) && o.type !== 'skip' && o.type !== 'running' && o.kind === 'area') {
         const b = boxes[i];
         for (let j = i + 1; j < S.objects.length; j++) {
           const q = S.objects[j], c = boxes[j];
           if (q.kind !== 'area' || q.type === 'skip' || q.type === 'running') continue;
           if (c.x0 > b.x1 || c.x1 < b.x0 || c.y0 > b.y1 || c.y1 < b.y0) continue;
+          const sameWord = sfWord && q.group === sfWord;
+          if (sameWord ? !trimWord : !S.knockout) continue;
           occ.push(q);
         }
       }
@@ -7708,6 +7757,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   $('txt').oninput = () => { liveText(); clearTimeout(renderFontList.t); renderFontList.t = setTimeout(renderFontList, 250); };
   ['txtH', 'txtSp', 'txtCv', 'txtLs'].forEach((id) => $(id).oninput = liveText);
   $('txtAlign').querySelectorAll('button').forEach((b) => b.onclick = () => { ui.align = b.dataset.align; liveText(); });
+  $('txtTrim').onchange = () => liveText();
   $('txtColor').oninput = () => { const o = ui.editingText && objById(ui.editingText); if (o) { for (const m of wordOf(o)) { m.color = normHex($('txtColor').value); m.ver = VER++; } draw(); renderLayers(); scheduleGen(); } };
   $('txtColor').onchange = () => { if (ui.editingText) { checkpoint(); changed(); } };
   $('addTextBtn').onclick = addOrUpdateText;

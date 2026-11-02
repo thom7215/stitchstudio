@@ -2066,26 +2066,69 @@ const Core = (() => {
     return best;
   }
   const flipRung = (r) => { const q = [r[1], r[0]]; q.cutA = r.cutB; q.cutB = r.cutA; return q; };
-  function genColumns(rings, cols, p, warn, start) {
+  /* The parts of hand-drawn columns that lie under a shape sewn later (the next letter of a script word that
+     runs into this one) are left out: each rung is trimmed to the part that is not covered, keeping a slight
+     overlap under the covering shape so no fabric shows where they meet. */
+  function occTester(occ, keep) {
+    if (!occ || !occ.length) return null;
+    const all = occ.flat();
+    if (!all.length) return null;
+    const bb = bbox(all);
+    let r = 0.06;
+    while ((bb.w / r + 8) * (bb.h / r + 8) > 3e6) r *= 1.25;
+    const W = Math.ceil(bb.w / r) + 8, H = Math.ceil(bb.h / r) + 8, ox = bb.x0 - 4 * r, oy = bb.y0 - 4 * r;
+    const mask = new Uint8Array(W * H);
+    for (const o of occ) { const m = rasterize(o, ox, oy, r, W, H); for (let i = 0; i < m.length; i++) mask[i] |= m[i]; }
+    const d = chamfer(mask, W, H), lim = keep / r;
+    return (x, y) => { const c = Math.floor((x - ox) / r), rr = Math.floor((y - oy) / r); return c >= 0 && rr >= 0 && c < W && rr < H && d[rr * W + c] > lim; };
+  }
+  function clipRungsUnder(rungs, covered, closed) {
+    if (!covered) return [{ rungs, closed }];
+    const n = rungs.length, part = [];
+    for (const r of rungs) {
+      const L = dist(r[0], r[1]), m = Math.max(2, Math.ceil(L / 0.08));
+      let best = null, run = -1;
+      for (let i = 0; i <= m + 1; i++) {
+        const free = i <= m && (() => { const q = lerp(r[0], r[1], i / m); return !covered(q[0], q[1]); })();
+        if (free && run < 0) run = i;
+        if (!free && run >= 0) { if (!best || i - 1 - run > best[1] - best[0]) best = [run, i - 1]; run = -1; }
+      }
+      part.push(!best || (best[1] - best[0]) / m < 0.15 ? null : best[0] === 0 && best[1] === m ? r : (() => { const q = [lerp(r[0], r[1], best[0] / m), lerp(r[0], r[1], best[1] / m)]; q.cutA = best[0] > 0; q.cutB = best[1] < m; return q; })());
+    }
+    if (part.every((q, i) => q === rungs[i])) return [{ rungs, closed }];
+    const pieces = []; let cur = [];
+    const mid = (q) => lerp(q[0], q[1], 0.5);
+    for (let i = 0; i < n; i++) { if (part[i]) cur.push(part[i]); else { if (cur.length >= 2) pieces.push(cur); cur = []; } }
+    if (cur.length >= 2) pieces.push(cur);
+    // a loop that was cut: its last piece runs on into the first
+    if (closed && part[0] && part[n - 1] && pieces.length > 1) { const last = pieces.pop(); pieces[0] = last.concat(pieces[0]); }
+    return pieces.filter((pc) => { let L = 0; for (let i = 1; i < pc.length; i++) L += dist(mid(pc[i - 1]), mid(pc[i])); return L >= 0.6; }).map((pc) => ({ rungs: pc, closed: false }));
+  }
+  function genColumns(rings, cols, p, warn, start, occ) {
     const step = p.spacing / 2 / 4;
     let ignored = false, wide = false;
     const items = [];
+    const covered = testOpts.noColumnKnockout ? null : occTester(occ, 0.3);
     cols.forEach((col, ci) => {
       const lay = columnLayout(rings, col);
       if (!lay) return;
       if (lay.rungs.some((r) => r.ignored)) ignored = true;
-      const base = columnRungs(lay, step);
-      if (base.length < 2) return;
-      if (base.some(([a, b]) => dist(a, b) > 7.5)) wide = true;
-      const opts = [];
-      const variants = p.autoOrder ? [[false, false], [false, true], ...(lay.closed ? [] : [[true, false], [true, true]])] : [[false, false]];
-      for (const [rev, swap] of variants) {
-        let rungs = rev ? base.slice().reverse() : base;
-        if (rev !== swap) rungs = rungs.map(flipRung);
-        const out = satinFromRungs(rungs, { maxLen: p.maxLen, pull: p.pull, underlay: p.underlay !== 'none' && rungs.length > 6, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, closed: lay.closed, endForward: true });
-        if (out.length) opts.push({ rev, swap, out, s: out[0], e: out[out.length - 1] });
+      const base0 = columnRungs(lay, step);
+      if (base0.length < 2) return;
+      if (base0.some(([a, b]) => dist(a, b) > 7.5)) wide = true;
+      for (const piece of clipRungsUnder(base0, covered, lay.closed)) {
+        const base = piece.rungs;
+        if (base.length < 2) continue;
+        const opts = [];
+        const variants = p.autoOrder ? [[false, false], [false, true], ...(piece.closed ? [] : [[true, false], [true, true]])] : [[false, false]];
+        for (const [rev, swap] of variants) {
+          let rungs = rev ? base.slice().reverse() : base;
+          if (rev !== swap) rungs = rungs.map(flipRung);
+          const out = satinFromRungs(rungs, { maxLen: p.maxLen, pull: p.pull, underlay: p.underlay !== 'none' && rungs.length > 6, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, closed: piece.closed, endForward: true });
+          if (out.length) opts.push({ rev, swap, out, s: out[0], e: out[out.length - 1] });
+        }
+        if (opts.length) items.push({ ci, opts });
       }
-      if (opts.length) items.push({ ci, opts });
     });
     if (!(p.maxLen > 100) && warn && wide) warn('Satin stitches wider than 7.5 mm are split in two.');
     if (ignored && warn) warn('A rung crosses another rung or sits past the end of a rail, so it is ignored.');
@@ -2327,7 +2370,7 @@ const Core = (() => {
       else if (o.type === 'satin') {
         const dir = o.params.satinDir;
         if (dir === 'angle') segs = genSatinAngle(o.rings, occ, { ...P, angle: o.params.satinAngle ?? 0 }, start);
-        else if (dir === 'columns' && o.columns && o.columns.length) { segs = genColumns(o.rings, o.columns, P, addWarn, start); colPlan = segs.plan; }
+        else if (dir === 'columns' && o.columns && o.columns.length) { segs = genColumns(o.rings, o.columns, P, addWarn, start, occ); colPlan = segs.plan; }
         else if (dir === 'guides' && o.guides && o.guides.length) segs = genSatinGuides(o.rings, occ, o.guides, o.dirs || [], P, addWarn);
         else if (dir === 'columns') {
           addWarn('No columns yet, so nothing is stitched on this shape.');
