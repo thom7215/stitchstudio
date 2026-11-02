@@ -14,13 +14,13 @@ async def main():
         print('old font now named:', await pg.evaluate("JSON.parse(localStorage.getItem('ss-fonts'))[0].name"), '|', (await pg.locator('#fontPanel .status').last.inner_text()))
         # new font: the name follows "Traced from"
         await pg.click('#sfNewBtn'); await pg.wait_for_timeout(300)
-        opts = await pg.evaluate("[...document.querySelectorAll('#sfSrc option')].map(o=>o.value)")
+        opts = await pg.evaluate("[...document.querySelectorAll('#sfSrcList button')].map(o=>o.dataset.font)")
         pick = 'Georgia' if 'Georgia' in opts else opts[min(3, len(opts)-1)]
-        await pg.select_option('#sfSrc', pick); await pg.wait_for_timeout(100)
+        await pg.click(f'#sfSrcList button[data-font="{pick}"]'); await pg.wait_for_timeout(100)
         print('pick', pick, '-> name box:', await pg.input_value('#sfName'))
-        await pg.fill('#sfName', 'My Script'); await pg.select_option('#sfSrc', opts[0]); await pg.wait_for_timeout(100)
+        await pg.fill('#sfName', 'My Script'); await pg.click(f'#sfSrcList button[data-font="{opts[0]}"]'); await pg.wait_for_timeout(100)
         print('typed own name, then changed font -> name box:', await pg.input_value('#sfName'))
-        await pg.fill('#sfName', ''); await pg.dispatch_event('#sfName', 'input'); await pg.select_option('#sfSrc', pick); await pg.wait_for_timeout(100)
+        await pg.fill('#sfName', ''); await pg.dispatch_event('#sfName', 'input'); await pg.click(f'#sfSrcList button[data-font="{pick}"]'); await pg.wait_for_timeout(100)
         print('cleared name, then picked a font -> name box:', await pg.input_value('#sfName'))
         await pg.click('#sfCreate'); await pg.wait_for_function("document.getElementById('busy').hidden", timeout=60000); await pg.wait_for_timeout(500)
         print('created:', await pg.evaluate("JSON.parse(localStorage.getItem('ss-fonts')).map(f=>f.name+' <- '+f.source.font)"))

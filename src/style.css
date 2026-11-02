@@ -322,3 +322,5 @@ body.fontmode #leftTabs, body.fontmode [data-ltab], body.fontmode .steps, body.f
 /* the needle while Watch it sew plays */
 .playhead { position: absolute; left: -6px; top: -6px; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.35); pointer-events: none; z-index: 2; will-change: transform; }
 .playhead[hidden] { display: none; }
+.fontlist.sflist { max-height: 140px; margin-bottom: 6px; }
+#sfSrcList { margin-top: 4px; }

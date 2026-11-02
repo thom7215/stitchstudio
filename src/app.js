@@ -531,6 +531,9 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
 
   /* ---------------- fonts ---------------- */
   const fonts = { web: WEB_FONTS, local: [], added: [], full: false };
+  const abc = (list, key = (x) => x) => [...list].sort((a, b) => key(a).localeCompare(key(b), undefined, { sensitivity: 'base', numeric: true }));
+  const fontBtn = (value, family, sample, label, selected, extra = '', cls = '') =>
+    `<button type="button" role="option" ${cls ? `class="${cls}"` : ''} data-font="${esc(value)}" aria-selected="${selected}" style="font-family:&quot;${esc(family)}&quot;,sans-serif;${extra}" title="${esc(label)}"><span>${esc(sample)}</span><small>${esc(label)}</small></button>`;
   function renderFontList() {
     const q = $('fontSearch').value.trim().toLowerCase();
     const sample = ($('txt').value.split('\n')[0] || 'Abc').slice(0, 14) || 'Abc';
@@ -543,14 +546,14 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     let html = '';
     let any = false;
     // fonts digitized in Font Studio come first; the sample is shown in the font they were traced from
-    const sf = sfonts.filter((f) => !q || f.name.toLowerCase().includes(q));
+    const sf = abc(sfonts.filter((f) => !q || f.name.toLowerCase().includes(q)), (f) => f.name);
     if (sf.length) {
       any = true;
       html += `<div class="grp">Digitized fonts</div>`;
       for (const f of sf) html += `<button type="button" role="option" class="sfont" data-font="sfont:${f.id}" aria-selected="${ui.font === 'sfont:' + f.id}" style="font-family:&quot;${esc(f.source.font)}&quot;,sans-serif;${f.source.bold ? 'font-weight:700;' : ''}${f.source.italic ? 'font-style:italic;' : ''}" title="${esc(f.name)}"><span>${esc(sample)}</span><small>${esc(f.name)}</small></button>`;
     }
     for (const [label, list] of groups) {
-      const L = list.filter((f) => !q || f.toLowerCase().includes(q));
+      const L = abc(list.filter((f) => !q || f.toLowerCase().includes(q)));
       if (!L.length) continue;
       any = true;
       html += `<div class="grp">${esc(label)}</div>`;
@@ -4001,9 +4004,10 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     $('sfCount').textContent = `${n} of ${FONT_CHARS.length} characters digitized`;
     box.querySelectorAll('button[data-ch]').forEach((b) => b.onclick = () => openGlyph(b.dataset.ch));
   }
-  function sourceFontOptions(sel) {
-    const all = [...new Set([...fonts.added, ...fonts.local, ...fonts.web])];
-    return all.map((n) => `<option value="${esc(n)}" ${n === sel ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  function sourceFontList(sel, q) {
+    q = (q || '').trim().toLowerCase();
+    const all = abc([...new Set([...fonts.added, ...fonts.local, ...fonts.web])]).filter((n) => !q || n.toLowerCase().includes(q));
+    return all.length ? all.slice(0, 600).map((n) => fontBtn(n, n, 'Abc', n, n === sel)).join('') : '<div class="empty">No fonts match.</div>';
   }
   // A font named "<another font> stitch" got that name by default, not by choice (the name used to stay on
   // the font first shown when a different one was picked to trace from): name it after the font it was traced from
@@ -4025,8 +4029,8 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const srcDefault = !isSfont(ui.font) && ui.font ? ui.font : pickDefaultFont();
     box.innerHTML = `
       <h2>Font Studio</h2>
-      ${sfonts.length ? `<label for="sfSel" class="lbl">Digitized font</label>
-      <select id="sfSel">${sfonts.map((x) => `<option value="${x.id}" ${f && x.id === f.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
+      ${sfonts.length ? `<div class="lbl">Digitized font</div>
+      <div id="sfSel" class="fontlist sflist" role="listbox" aria-label="Digitized fonts">${abc(sfonts, (x) => x.name).map((x) => fontBtn(x.id, x.source.font, 'Abc', x.name, !!(f && x.id === f.id), `${x.source.bold ? 'font-weight:700;' : ''}${x.source.italic ? 'font-style:italic;' : ''}`)).join('')}</div>
       <div class="row">
         <button type="button" class="small ${fontWs.newOpen ? 'toggle' : 'ghost'}" id="sfNewBtn" aria-pressed="${fontWs.newOpen}">＋ New font</button>
         <button type="button" class="small ghost" id="sfRename" ${f ? '' : 'disabled'}>Rename</button>
@@ -4039,7 +4043,8 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       <input type="file" id="sfImport" accept=".json,application/json" hidden>
       ${fontWs.newOpen || !sfonts.length ? `<div class="newfont">
         <label for="sfName" class="lbl">Name</label><input type="text" id="sfName" value="${esc(srcDefault)} stitch" maxlength="40" data-auto="1">
-        <label for="sfSrc" class="lbl">Traced from</label><select id="sfSrc">${sourceFontOptions(srcDefault)}</select>
+        <label for="sfSrcSearch" class="lbl">Traced from</label><input type="search" id="sfSrcSearch" placeholder="Search fonts" autocomplete="off"><input type="hidden" id="sfSrc" value="${esc(srcDefault)}">
+        <div id="sfSrcList" class="fontlist" role="listbox" aria-label="Font to trace from"></div>
         <div class="row"><button type="button" class="toggle small" id="sfBold" aria-pressed="false"><b>Bold</b></button><button type="button" class="toggle small" id="sfItal" aria-pressed="false"><i>Italic</i></button></div>
         <div class="field"><label for="sfCap">Capital height</label><input type="number" id="sfCap" min="5" max="80" step="1" value="25"><output>mm</output></div>
         <button type="button" class="primary wide" id="sfCreate">Create font</button>
@@ -4050,7 +4055,10 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       ${g ? `<div class="field"><label for="sfAdv">Width of ${esc(fontWs.ch)}</label><input type="number" id="sfAdv" min="0.5" step="0.1" value="${g.adv.toFixed(1)}"><output>mm</output></div>` : ''}
       <p class="status">Traced from ${esc(f.source.font)}${f.source.bold ? ' Bold' : ''}${f.source.italic ? ' Italic' : ''} · ${f.cap} mm capital height</p>` : ''}`;
     renderGlyphGrid();
-    const sel = $('sfSel'); if (sel) sel.onchange = () => { saveGlyph(true); fontWs.fontId = sel.value; fontWs.newOpen = false; openGlyph(firstGlyph()); };
+    const sel = $('sfSel'); if (sel) {
+      sel.onclick = (e) => { const b = e.target.closest('button[data-font]'); if (!b || (f && b.dataset.font === f.id)) return; saveGlyph(true); fontWs.fontId = b.dataset.font; fontWs.newOpen = false; openGlyph(firstGlyph()); };
+      const on = sel.querySelector('[aria-selected="true"]'); if (on) on.scrollIntoView({ block: 'nearest' });
+    }
     const nb = $('sfNewBtn'); if (nb) nb.onclick = () => { fontWs.newOpen = !fontWs.newOpen; renderFontPanel(); };
     const rn = $('sfRename'); if (rn) rn.onclick = () => { const nm = prompt('Font name', f.name); if (nm && nm.trim()) { f.name = nm.trim().slice(0, 40); saveFonts(true); renderFontPanel(); } };
     const del = $('sfDelete'); if (del) del.onclick = () => {
@@ -4079,7 +4087,16 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       it.onclick = () => it.setAttribute('aria-pressed', it.getAttribute('aria-pressed') !== 'true');
       const nameBox = $('sfName');
       nameBox.oninput = () => { nameBox.dataset.auto = nameBox.value.trim() ? '0' : '1'; };
-      $('sfSrc').onchange = () => { if (nameBox.dataset.auto === '1') nameBox.value = `${$('sfSrc').value} stitch`; };
+      const srcList = $('sfSrcList'), srcIn = $('sfSrc');
+      const fillSrc = () => { srcList.innerHTML = sourceFontList(srcIn.value, $('sfSrcSearch').value); const on = srcList.querySelector('[aria-selected="true"]'); if (on) on.scrollIntoView({ block: 'nearest' }); };
+      fillSrc();
+      $('sfSrcSearch').oninput = fillSrc;
+      srcList.onclick = (e) => {
+        const btn = e.target.closest('button[data-font]'); if (!btn) return;
+        srcIn.value = btn.dataset.font;
+        srcList.querySelectorAll('button[data-font]').forEach((x) => x.setAttribute('aria-selected', x === btn));
+        if (nameBox.dataset.auto === '1') nameBox.value = `${srcIn.value} stitch`;
+      };
       $('sfCreate').onclick = async () => {
         const name = (nameBox.dataset.auto === '1' ? `${$('sfSrc').value} stitch` : (nameBox.value || '').trim()) || `${$('sfSrc').value} stitch`;
         const cap = Math.max(5, Math.min(80, +$('sfCap').value || 25));
