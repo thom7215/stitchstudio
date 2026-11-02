@@ -2887,9 +2887,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         <button class="small ghost" id="centerSel">Center</button>
       </div>
       <div class="row">
-        ${isText ? '<button class="small" id="editTextBtn">Edit text</button>' : ''}
-        <button class="small ghost" id="upBtn" title="Sew earlier">Sew earlier</button>
-        <button class="small ghost" id="downBtn" title="Sew later">Sew later</button>
+        <button class="small ghost" id="fitSelBtn" title="Make the selection as big as fits in the hoop, in the middle">Fit to hoop</button>
         <button class="small ghost" id="dupBtn">Duplicate</button>
         <button class="small ghost" id="delBtn">Delete</button>
       </div>
@@ -2936,11 +2934,9 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     $('rotR').onclick = async () => { const [x, y] = c(); await rotate(selected(), 90, x, y); checkpoint(); changed(); };
     $('flipBtn').onclick = async () => { const [x] = c(); await flip(selected(), x); checkpoint(); changed(); };
     $('centerSel').onclick = () => { const [x, y] = c(); translate(selected(), -x, -y); checkpoint(); changed(); };
-    $('upBtn').onclick = () => moveOrder(-1);
-    $('downBtn').onclick = () => moveOrder(1);
+    $('fitSelBtn').onclick = async () => { const list = selected(), b = unionBBox(list), h = hoop(); if (!b) return; const k = Math.min((h.w - 12) / b.w, (h.h - 12) / b.h); const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2; await scale(list, k, k, cx, cy); translate(list, -cx, -cy); checkpoint(); changed(); fitView(); };
     $('dupBtn').onclick = duplicateSelected;
     $('delBtn').onclick = removeSelected;
-    const et = $('editTextBtn'); if (et) et.onclick = () => { setTab('l', 'text'); $('txt').focus(); };
   }
 
   /* ---------- satin path panel ---------- */
@@ -3903,7 +3899,6 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   /* ---------------- side panel tabs ---------------- */
   $('objAll').onclick = () => { ui.sel = new Set(S.objects.map((o) => o.id)); ui.keepTab = true; selectionChanged(); };
   $('objNone').onclick = () => { ui.sel = new Set(); ui.keepTab = true; selectionChanged(); };
-  $('objInvert').onclick = () => { ui.sel = new Set(S.objects.filter((o) => !ui.sel.has(o.id)).map((o) => o.id)); ui.keepTab = true; selectionChanged(); };
   document.querySelectorAll('[data-objtype]').forEach((b) => b.onclick = () => { ui.sel = new Set(S.objects.filter((o) => o.type === b.dataset.objtype).map((o) => o.id)); ui.keepTab = true; selectionChanged(); });
   $('objSearch').oninput = () => renderObjects();
   try { ui.ltab = localStorage.getItem('ss-ltab') || 'art'; ui.rtab = localStorage.getItem('ss-rtab') || 'stitch'; if (ui.rtab === 'arrange') ui.rtab = 'objects'; } catch (e) { ui.ltab = 'art'; ui.rtab = 'stitch'; }
