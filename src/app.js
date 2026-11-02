@@ -1674,7 +1674,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const RAIL = '#12a150'; // rails stand out in green against the blue selection and stitches
     ctx.save();
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    const pvs = colPreviews(o), plan = colPlan(o);
+    const pvs = colPreviews(o), plan = colPlan(o), badges = [];
     const line = (P, closed) => { const p = new Path2D(); P.forEach((q, i) => i ? p.lineTo(q[0], q[1]) : p.moveTo(q[0], q[1])); if (closed) p.closePath(); return p; };
     const a = ui.active;
     (o.columns || []).forEach((col, ci) => {
@@ -1716,9 +1716,13 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
           ctx.strokeStyle = '#fff'; ctx.lineWidth = 6 * px; ctx.beginPath(); ctx.moveTo(seg[0][0], seg[0][1]); ctx.lineTo(seg[1][0], seg[1][1]); ctx.stroke();
           ctx.strokeStyle = c; ctx.lineWidth = 3.4 * px; ctx.stroke();
         }
+        // the number sits just past the start of the column, clear of the rail dots; drawn last, on top
         const m = Core.lerp(sSeg[0], sSeg[1], 0.5);
-        ctx.fillStyle = '#0f9d58'; ctx.beginPath(); ctx.arc(m[0], m[1], 7 * px, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = '#fff'; ctx.font = `700 ${9 * px}px Archivo, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(colNo(o, ci)), m[0], m[1] + 0.5 * px);
+        const atEnd = pq && pq.rev, nA = pv.A.length, nB = pv.B.length, kk = Math.min(6, nA - 1, nB - 1);
+        const inner = kk > 0 ? Core.lerp(pv.A[atEnd ? nA - 1 - kk : kk], pv.B[atEnd ? nB - 1 - kk : kk], 0.5) : m;
+        let dx = m[0] - inner[0], dy = m[1] - inner[1], L = Math.hypot(dx, dy);
+        if (pv.closed || L < 1e-6) { dx = 0; dy = -1; L = 1; }
+        badges.push({ m, at: [m[0] + dx / L * 15 * px, m[1] + dy / L * 15 * px], n: colNo(o, ci), on });
       }
       // rungs
       pv.rungs.forEach((r, ri) => {
@@ -1834,6 +1838,18 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     if (dragState && dragState.mode === 'rungline') {
       ctx.strokeStyle = '#e8730c'; ctx.lineWidth = 2.5 * px;
       ctx.beginPath(); ctx.moveTo(dragState.a[0], dragState.a[1]); ctx.lineTo(dragState.b[0], dragState.b[1]); ctx.stroke();
+    }
+    // column numbers, on top of everything
+    for (const b of badges) {
+      const R = (b.on ? 10.5 : 9.5) * px;
+      ctx.strokeStyle = '#0f9d58'; ctx.lineWidth = 1.6 * px; ctx.beginPath(); ctx.moveTo(b.m[0], b.m[1]); ctx.lineTo(b.at[0], b.at[1]); ctx.stroke();
+      ctx.save();
+      ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 4; ctx.shadowOffsetY = 1;
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(b.at[0], b.at[1], R + 2 * px, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = b.on ? '#06612f' : '#0f9d58'; ctx.beginPath(); ctx.arc(b.at[0], b.at[1], R, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = `800 ${(String(b.n).length > 1 ? 10 : 12) * px}px Archivo, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(String(b.n), b.at[0], b.at[1] + 0.6 * px);
     }
     ctx.restore();
   }
