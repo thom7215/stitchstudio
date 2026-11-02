@@ -516,13 +516,6 @@ body.fontmode #leftTabs, body.fontmode [data-ltab], body.fontmode .steps, body.f
           <button type="button" class="small ghost" id="objAll">Select all</button>
           <button type="button" class="small ghost" id="objNone">None</button>
         </div>
-        <div class="row objtools">
-          <span class="lbl inline">All</span>
-          <button type="button" class="tiny ghost" data-objtype="satin">Satin</button>
-          <button type="button" class="tiny ghost" data-objtype="fill">Fill</button>
-          <button type="button" class="tiny ghost" data-objtype="running">Outline</button>
-          <button type="button" class="tiny ghost" data-objtype="skip">Skip</button>
-        </div>
         <input type="search" id="objSearch" placeholder="Find by name" autocomplete="off">
         <ul id="objList" class="objlist" role="tree" aria-label="Objects"></ul>
       </section>
@@ -7899,7 +7892,6 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   /* ---------------- side panel tabs ---------------- */
   $('objAll').onclick = () => { ui.sel = new Set(S.objects.map((o) => o.id)); ui.keepTab = true; selectionChanged(); };
   $('objNone').onclick = () => { ui.sel = new Set(); ui.keepTab = true; selectionChanged(); };
-  document.querySelectorAll('[data-objtype]').forEach((b) => b.onclick = () => { ui.sel = new Set(S.objects.filter((o) => o.type === b.dataset.objtype).map((o) => o.id)); ui.keepTab = true; selectionChanged(); });
   $('objSearch').oninput = () => renderObjects();
   try { ui.ltab = localStorage.getItem('ss-ltab') || 'art'; ui.rtab = localStorage.getItem('ss-rtab') || 'stitch'; if (ui.rtab === 'arrange') ui.rtab = 'objects'; } catch (e) { ui.ltab = 'art'; ui.rtab = 'stitch'; }
   function applyTabs() {

@@ -3899,7 +3899,6 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   /* ---------------- side panel tabs ---------------- */
   $('objAll').onclick = () => { ui.sel = new Set(S.objects.map((o) => o.id)); ui.keepTab = true; selectionChanged(); };
   $('objNone').onclick = () => { ui.sel = new Set(); ui.keepTab = true; selectionChanged(); };
-  document.querySelectorAll('[data-objtype]').forEach((b) => b.onclick = () => { ui.sel = new Set(S.objects.filter((o) => o.type === b.dataset.objtype).map((o) => o.id)); ui.keepTab = true; selectionChanged(); });
   $('objSearch').oninput = () => renderObjects();
   try { ui.ltab = localStorage.getItem('ss-ltab') || 'art'; ui.rtab = localStorage.getItem('ss-rtab') || 'stitch'; if (ui.rtab === 'arrange') ui.rtab = 'objects'; } catch (e) { ui.ltab = 'art'; ui.rtab = 'stitch'; }
   function applyTabs() {
