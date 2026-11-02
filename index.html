@@ -5851,7 +5851,9 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         return;
       }
       if (h) {
-        ui.active = h;
+        // a click on the line of the column that is already selected deselects it
+        const sameCol = h.kind === 'col' && ui.active && ui.active.ci === h.ci && ui.active.rail !== 'R' && ui.active.kind !== 'bline' && e.detail < 2;
+        ui.active = sameCol ? null : h;
         dragState = h.kind === 'rp' || h.kind === 'ru' || h.kind === 'rungline' ? { mode: 'colhandle', h, x: e.offsetX, y: e.offsetY, moving: false } : null;
         renderInspector(); draw();
         return;
@@ -6726,7 +6728,11 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       li.onmouseleave = () => { if (ui.hoverCol && ui.hoverCol.ci === ci) { ui.hoverCol = null; draw(); } };
       li.onclick = (e) => {
         const b = e.target.closest('button[data-c]');
-        if (!b) { ui.active = { kind: 'col', ci }; renderInspector(); draw(); return; }
+        if (!b) {
+          // clicking the selected column's row again deselects it
+          const a0 = ui.active, isOn = a0 && a0.ci === ci && a0.rail !== 'R' && a0.kind !== 'bline';
+          ui.active = isOn ? null : { kind: 'col', ci }; renderInspector(); draw(); return;
+        }
         const C = o.columns;
         if (b.dataset.c === 'cont') { continueColumn(o, ci); return; }
         if (b.dataset.c === 'up' && ci > 0) [C[ci - 1], C[ci]] = [C[ci], C[ci - 1]];
