@@ -776,7 +776,17 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   function draw() {
     if (drawQueued) return;
     drawQueued = true;
-    requestAnimationFrame(() => { drawQueued = false; paint(); updateScrollbars(); });
+    const fast = ui.playFrame && ui.playing && play.ok && play.key === playKey() && !dragState;
+    ui.playFrame = false;
+    requestAnimationFrame(() => {
+      drawQueued = false;
+      if (fast && play.ok && play.key === playKey()) { paintPlayFrame(); return; }
+      paint(); updateScrollbars();
+      // a full redraw while playing: later frames add to it
+      play.ok = !!(ui.playing && A); play.key = playKey();
+      if (play.ok) { const n = A.X.length; play.lim = ui.sim >= 1 ? n : Math.max(1, Math.floor(ui.sim * n)); playMarker(play.lim < n ? play.lim - 1 : null); }
+      else playMarker(null);
+    });
   }
 
   /* ---------------- hoop geometry ---------------- */
@@ -881,6 +891,87 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     }
     return k;
   }
+  // draw stitches [from, to) as threads onto g (a 2D context the size of the screen)
+  function threadRange(g, from, to) {
+    const s = view.s;
+    g.setTransform(dpr * s, 0, 0, dpr * s, dpr * view.ox, dpr * view.oy);
+    g.lineCap = 'round';
+    const X = A.X, Y = A.Y, C = A.C;
+    const w = 0.4; // thread width in mm
+    // how much detail shows: none when a thread is about a pixel wide, full from about 4 pixels
+    const px = w * s * dpr, detail = Math.max(0, Math.min(1, (px - 1.1) / 3));
+    const lx = -0.6, ly = -0.8; // light from the top left
+    // visible part of the hoop, so stitches off screen are skipped
+    const x0 = -view.ox / s - 2, x1 = (cw - view.ox) / s + 2, y0 = -view.oy / s - 2, y1 = (ch - view.oy) / s + 2;
+    let ci = 0;
+    for (let i = 1; i < from && i < C.length; i++) if (C[i] === 3) ci++;
+    for (let i = from; i < to; i++) {
+      if (C[i] === 3) { ci++; continue; }
+      if (C[i] !== 0 || C[i - 1] === 3 || C[i - 1] === 2) continue;
+      const ax = X[i - 1], ay = Y[i - 1], bx = X[i], by = Y[i];
+      if ((ax < x0 && bx < x0) || (ax > x1 && bx > x1) || (ay < y0 && by < y0) || (ay > y1 && by > y1)) continue;
+      const dx = bx - ax, dy = by - ay, len = Math.hypot(dx, dy);
+      if (len < 0.05) continue;
+      const ux = dx / len, uy = dy / len;
+      const k = inks(A.colors[ci] || '#888888');
+      const e = Math.min(0.1, len * 0.18) * detail;
+      const sx = ax + ux * e, sy = ay + uy * e, ex = bx - ux * e, ey = by - uy * e;
+      if (detail > 0) {
+        g.globalAlpha = 0.35 + 0.65 * detail; g.strokeStyle = k.edge; g.lineWidth = w * (1 + 0.28 * detail);
+        g.beginPath(); g.moveTo(sx, sy); g.lineTo(ex, ey); g.stroke(); g.globalAlpha = 1;
+      }
+      g.strokeStyle = k.body; g.lineWidth = w;
+      g.beginPath(); g.moveTo(sx, sy); g.lineTo(ex, ey); g.stroke();
+      if (detail > 0.15 && len > w * 0.9) {
+        // sheen on the lit side of the strand
+        let nx = -uy, ny = ux; if (nx * lx + ny * ly < 0) { nx = -nx; ny = -ny; }
+        const o = w * 0.17, t = Math.min(len * 0.25, w * 0.5);
+        g.strokeStyle = k.shine; g.lineWidth = w * 0.3; g.globalAlpha = 0.65 * detail;
+        g.beginPath(); g.moveTo(sx + ux * t + nx * o, sy + uy * t + ny * o); g.lineTo(ex - ux * t + nx * o, ey - uy * t + ny * o); g.stroke();
+        g.globalAlpha = 1;
+      }
+    }
+  }
+  // quick drawing (zoomed far out): plain lines in the thread colour
+  function quickRange(g, from, to) {
+    const s = view.s;
+    g.setTransform(dpr * s, 0, 0, dpr * s, dpr * view.ox, dpr * view.oy);
+    g.lineCap = 'round'; g.lineJoin = 'round'; g.lineWidth = Math.max(0.3, 1 / s);
+    const X = A.X, Y = A.Y, C = A.C;
+    let ci = 0;
+    for (let i = 1; i < from && i < C.length; i++) if (C[i] === 3) ci++;
+    let open = false;
+    for (let i = from; i < to; i++) {
+      if (C[i] === 3) { if (open) { g.stroke(); open = false; } ci++; continue; }
+      if (C[i] !== 0 || C[i - 1] === 3 || C[i - 1] === 2) continue;
+      if (!open) { g.beginPath(); g.strokeStyle = A.colors[ci] || '#888888'; open = true; }
+      g.moveTo(X[i - 1], Y[i - 1]); g.lineTo(X[i], Y[i]);
+    }
+    if (open) g.stroke();
+  }
+  /* Watch it sew: each frame only adds the stitches sewn since the last frame on top of the picture
+     already on screen (redrawing the whole hoop every frame made it stutter on slower computers).
+     The needle is a small marker over the canvas. Anything else that needs drawing does a full redraw. */
+  const play = { ok: false, lim: 0, key: '' };
+  const playKey = () => [assembledVer, view.s, view.ox, view.oy, cw, ch, dpr, ui.view].join('|');
+  function playMarker(i) {
+    const m = $('playhead');
+    if (i == null || !A || i < 0) { m.hidden = true; return; }
+    m.hidden = false;
+    m.style.transform = `translate(${A.X[i] * view.s + view.ox}px, ${A.Y[i] * view.s + view.oy}px)`;
+  }
+  function paintPlayFrame() {
+    const n = A.X.length, lim = ui.sim >= 1 ? n : Math.max(1, Math.floor(ui.sim * n));
+    if (lim > play.lim) {
+      const fine = view.s >= 2.6;
+      ctx.save();
+      if (fine) { threadRange(ctx, Math.max(1, play.lim), lim); threadRange(threadLayer.cv.getContext('2d'), Math.max(1, play.lim), lim); threadLayer.lim = lim; }
+      else quickRange(ctx, Math.max(1, play.lim), lim);
+      ctx.restore();
+      play.lim = lim;
+    }
+    playMarker(lim < n ? lim - 1 : null);
+  }
   function drawThreads(lim) {
     const L = threadLayer, W = Math.round(cw * dpr), H = Math.round(ch * dpr);
     const skey = [assembledVer, A.X.length, W, H].join('|');
@@ -901,44 +992,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     if (L.key !== key || lim < L.lim) { g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, W, H); L.key = key; L.vkey = skey; L.lim = 0; L.s = view.s; L.ox = view.ox; L.oy = view.oy; }
     else from = Math.max(1, L.lim);
     if (lim > L.lim) {
-      const s = view.s;
-      g.setTransform(dpr * s, 0, 0, dpr * s, dpr * view.ox, dpr * view.oy);
-      g.lineCap = 'round';
-      const X = A.X, Y = A.Y, C = A.C;
-      const w = 0.4; // thread width in mm
-      // how much detail shows: none when a thread is about a pixel wide, full from about 4 pixels
-      const px = w * s * dpr, detail = Math.max(0, Math.min(1, (px - 1.1) / 3));
-      const lx = -0.6, ly = -0.8; // light from the top left
-      // visible part of the hoop, so stitches off screen are skipped
-      const x0 = -view.ox / s - 2, x1 = (cw - view.ox) / s + 2, y0 = -view.oy / s - 2, y1 = (ch - view.oy) / s + 2;
-      let ci = 0;
-      for (let i = 1; i < from && i < C.length; i++) if (C[i] === 3) ci++;
-      for (let i = from; i < lim; i++) {
-        if (C[i] === 3) { ci++; continue; }
-        if (C[i] !== 0 || C[i - 1] === 3 || C[i - 1] === 2) continue;
-        const ax = X[i - 1], ay = Y[i - 1], bx = X[i], by = Y[i];
-        if ((ax < x0 && bx < x0) || (ax > x1 && bx > x1) || (ay < y0 && by < y0) || (ay > y1 && by > y1)) continue;
-        const dx = bx - ax, dy = by - ay, len = Math.hypot(dx, dy);
-        if (len < 0.05) continue;
-        const ux = dx / len, uy = dy / len;
-        const k = inks(A.colors[ci] || '#888888');
-        const e = Math.min(0.1, len * 0.18) * detail;
-        const sx = ax + ux * e, sy = ay + uy * e, ex = bx - ux * e, ey = by - uy * e;
-        if (detail > 0) {
-          g.globalAlpha = 0.35 + 0.65 * detail; g.strokeStyle = k.edge; g.lineWidth = w * (1 + 0.28 * detail);
-          g.beginPath(); g.moveTo(sx, sy); g.lineTo(ex, ey); g.stroke(); g.globalAlpha = 1;
-        }
-        g.strokeStyle = k.body; g.lineWidth = w;
-        g.beginPath(); g.moveTo(sx, sy); g.lineTo(ex, ey); g.stroke();
-        if (detail > 0.15 && len > w * 0.9) {
-          // sheen on the lit side of the strand
-          let nx = -uy, ny = ux; if (nx * lx + ny * ly < 0) { nx = -nx; ny = -ny; }
-          const o = w * 0.17, t = Math.min(len * 0.25, w * 0.5);
-          g.strokeStyle = k.shine; g.lineWidth = w * 0.3; g.globalAlpha = 0.65 * detail;
-          g.beginPath(); g.moveTo(sx + ux * t + nx * o, sy + uy * t + ny * o); g.lineTo(ex - ux * t + nx * o, ey - uy * t + ny * o); g.stroke();
-          g.globalAlpha = 1;
-        }
-      }
+      threadRange(g, from, lim);
       L.lim = lim;
     }
     ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(L.cv, 0, 0); ctx.restore();
@@ -1067,7 +1121,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         for (let i = 1; i < lim; i++) if (C[i] === 1) { ctx.moveTo(X[i - 1], Y[i - 1]); ctx.lineTo(X[i], Y[i]); }
         ctx.stroke(); ctx.setLineDash([]);
       }
-      if (lim < n) {
+      if (lim < n && !ui.playing) {
         const i = lim - 1;
         ctx.fillStyle = theme.accent; ctx.beginPath(); ctx.arc(X[i], Y[i], 5 / s, 0, Math.PI * 2); ctx.fill();
         ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5 / s; ctx.stroke();
@@ -3346,6 +3400,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       // the speed can be changed while it plays
       ui.sim = Math.min(1, ui.sim + rate * (ui.playSpeed || 1) * dt / n);
       $('simRange').value = Math.round(ui.sim * 1000);
+      ui.playFrame = true;
       draw();
       if (ui.sim >= 1) { stopPlay(); return; }
       playRaf = requestAnimationFrame(step);
@@ -3358,7 +3413,10 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   $('speedSeg').querySelectorAll('button').forEach((b) => b.onclick = () => { ui.playSpeed = +b.dataset.speed; syncSpeed(); try { localStorage.setItem('ss-speed', ui.playSpeed); } catch (e) { } });
   syncSpeed();
   function stopPlay(reset) {
+    const was = ui.playing;
     ui.playing = false; cancelAnimationFrame(playRaf);
+    play.ok = false; playMarker(null);
+    if (was) draw();
     $('playBtn').textContent = '▶ Watch it sew';
   }
   function setView(v) {
