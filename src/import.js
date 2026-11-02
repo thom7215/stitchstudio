@@ -319,14 +319,20 @@ const Importer = (() => {
     const glyphs = [];
     const measured = lines.map((ln) => {
       const chars = Array.from(ln);
-      const adv = chars.map((ch) => ctx.measureText(ch).width + spacingPx);
+      const ms = chars.map((ch) => ctx.measureText(ch));
+      const adv = ms.map((m) => m.width + spacingPx);
       const total = adv.reduce((s, v) => s + v, 0) - (chars.length ? spacingPx : 0);
-      return { chars, adv, total };
+      return { chars, adv, total, ms };
     });
     const widestLine = Math.max(0, ...measured.map((m) => m.total));
-    measured.forEach(({ chars, adv, total }, li) => {
+    measured.forEach(({ chars, adv, total, ms }, li) => {
       let x = align === 'left' ? -widestLine / 2 : align === 'right' ? widestLine / 2 - total : -total / 2;
-      chars.forEach((ch, k) => { glyphs.push({ ch, x, w: adv[k] - spacingPx, line: li }); x += adv[k]; });
+      chars.forEach((ch, k) => {
+        // the ink can reach past the advance width (script swashes, italics): keep the whole letter on the canvas
+        const m = ms[k], w = adv[k] - spacingPx;
+        const ink = { l: Math.max(0, m.actualBoundingBoxLeft || 0), r: Math.max(w, m.actualBoundingBoxRight || 0), a: Math.max(px, m.actualBoundingBoxAscent || 0), d: Math.max(px * 0.4, m.actualBoundingBoxDescent || 0) };
+        glyphs.push({ ch, x, w, line: li, ink }); x += adv[k];
+      });
     });
     glyphs.lineWidth = widestLine;
     const curve = t.curve || 0;
@@ -350,9 +356,11 @@ const Importer = (() => {
     // canvas size
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     const corners = (g) => {
-      if (!g.rot && g.cx == null) return [[g.px, g.py - px], [g.px + g.w, g.py + px * 0.4]];
+      const n = g.ink;
+      if (!g.rot && g.cx == null) return [[g.px - n.l, g.py - n.a], [g.px + n.r, g.py + n.d]];
       const pts = [];
-      for (const [dx, dy] of [[-g.w / 2, -px], [g.w / 2, -px], [-g.w / 2, px * 0.4], [g.w / 2, px * 0.4]]) {
+      const L = -g.w / 2 - n.l, R = -g.w / 2 + n.r;
+      for (const [dx, dy] of [[L, -n.a], [R, -n.a], [L, n.d], [R, n.d]]) {
         const c = Math.cos(g.rot), s = Math.sin(g.rot);
         pts.push([g.cx + dx * c - (dy + capH / 2) * s, g.cy + dx * s + (dy + capH / 2) * c]);
       }
@@ -360,7 +368,7 @@ const Importer = (() => {
     };
     placed.forEach((g) => corners(g).forEach(([x, y]) => { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }));
     if (!isFinite(x0)) return [];
-    const pad = 12;
+    const pad = 16;
     let W = Math.ceil(x1 - x0) + pad * 2, H = Math.ceil(y1 - y0) + pad * 2;
     const maxDim = 9000;
     let k = 1;

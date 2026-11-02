@@ -3850,7 +3850,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     return !!(g && g.objects && g.objects.some((o) => o.type !== 'skip' && !(o.type === 'satin' && o.kind === 'area' && (o.params || {}).satinDir === 'columns' && !(o.columns && o.columns.length))));
   }
   async function createStitchFont(opts) {
-    const f = { id: 'sf' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: opts.name, source: { font: opts.font, bold: !!opts.bold, italic: !!opts.italic }, cap: opts.cap, metrics: null, glyphs: {}, created: Date.now() };
+    const f = { id: 'sf' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: opts.name, source: { font: opts.font, bold: !!opts.bold, italic: !!opts.italic }, cap: opts.cap, metrics: null, glyphs: {}, created: Date.now(), clipFix: 1 };
     for (const ch of FONT_CHARS) {
       const t = { str: ch, font: opts.font, bold: !!opts.bold, italic: !!opts.italic, height: opts.cap, spacing: 0, curve: 0, lineSpacing: 1, align: 'center' };
       const all = await Importer.traceText(t);
@@ -3933,6 +3933,51 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   ui.mode = 'studio';
   const fontWs = { fontId: null, ch: null, off: [0, 0], studio: null, newOpen: false };
   const curFont = () => sfontById(fontWs.fontId);
+  /* Letters traced before Nov 2026 could lose the parts of a swash or slant that reached past the letter's
+     width (the tracing canvas was cut at the advance width). Re-trace each character once and, where the old
+     outline matches the new one except for a cut-off part, put the full outline back. Rails, rungs and
+     settings are kept. Runs quietly in the background; a font whose source font is not available is left alone
+     and tried again next time. */
+  let repairing = false;
+  async function repairClippedGlyphs() {
+    if (repairing) return; repairing = true;
+    try {
+      for (const f of sfonts.slice()) {
+        if (f.clipFix || !f.source || !f.glyphs) continue;
+        const fixes = []; let tried = 0, matched = 0;
+        for (const ch of Object.keys(f.glyphs)) {
+          const g = f.glyphs[ch];
+          if (!g || !g.objects || g.objects.length !== 1 || g.objects[0].kind !== 'area' || !(g.objects[0].rings || []).length) continue;
+          tried++;
+          let all;
+          try { all = await Importer.traceText({ str: ch, font: f.source.font, bold: !!f.source.bold, italic: !!f.source.italic, height: f.cap, spacing: 0, curve: 0, lineSpacing: 1, align: 'center' }); } catch (e) { continue; }
+          const p = all.placed && all.placed[0];
+          if (!p || !all.length) continue;
+          const nr = all.map((r) => r.map(([x, y]) => [x - p.x, y - p.base]));
+          const old = g.objects[0].rings;
+          // is this the same letter, unmoved? most of the old outline lies on the new one
+          let n = 0, near = 0;
+          for (const r of old) for (let i = 0; i < r.length; i += 3) { n++; if (Core.nearestOnRings(nr, r[i]).d < 0.2) near++; }
+          if (!n || near / n < 0.6) continue;
+          matched++;
+          const ob = Core.bbox(old), nb = Core.bbox(nr);
+          if (nb.x0 < ob.x0 - 0.3 || nb.x1 > ob.x1 + 0.3 || nb.y0 < ob.y0 - 0.3 || nb.y1 > ob.y1 + 0.3) fixes.push([ch, nr]);
+        }
+        if (!sfonts.includes(f)) continue;
+        for (const [ch, nr] of fixes) {
+          const g = f.glyphs[ch];
+          if (ui.mode === 'font' && fontWs.fontId === f.id && fontWs.ch === ch && S.objects.length === 1 && S.objects[0].kind === 'area') {
+            // the letter is open: fix the one on the canvas, then save it as usual
+            const o = S.objects[0];
+            o.rings = nr.map((r) => r.map((q) => [q[0] + fontWs.off[0], q[1] + fontWs.off[1]]));
+            touch(o); changed(); saveGlyph(true);
+          } else g.objects[0].rings = nr;
+        }
+        if (tried && matched >= Math.max(1, tried * 0.5)) f.clipFix = 1;
+        if (fixes.length || f.clipFix) saveFonts(true);
+      }
+    } finally { repairing = false; }
+  }
   function setMode(m) {
     if (m === ui.mode) return;
     if (m === 'font') {
@@ -3944,6 +3989,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       fontWs.ch = null;
       if (curFont()) openGlyph(fontWs.ch || firstGlyph()); else { fontWs.newOpen = true; hist.stack = []; hist.i = -1; checkpoint(); changed(); }
       renderFontPanel(); fitView();
+      setTimeout(repairClippedGlyphs, 300);
     } else {
       saveGlyph(true);
       ui.mode = 'studio';
@@ -4127,6 +4173,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   loadSetup();
   addSteppers();
   $('modeSeg').querySelectorAll('button').forEach((b) => b.onclick = () => setMode(b.dataset.mode));
+  setTimeout(() => { repairClippedGlyphs(); }, 2500);
   readTheme();
   if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { readTheme(); draw(); });
   new MutationObserver(() => { readTheme(); draw(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
