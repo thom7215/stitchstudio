@@ -332,3 +332,4 @@ body.fontmode #leftTabs, body.fontmode [data-ltab], body.fontmode .steps, body.f
 .guides.cols.auto li { grid-template-columns: 22px 1fr auto; }
 .guides.cols .gnm small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .guides.cols .gnm { min-width: 0; }
+.guides.cols li:not(.on):hover { background: rgba(255, 196, 0, 0.14); border-color: rgba(255, 176, 0, 0.45); }

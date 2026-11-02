@@ -1730,13 +1730,14 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         }
         return;
       }
-      // the selected column: a bright band between its rails and a glow along them
-      if (on) {
+      // the selected column: a bright band between its rails and a glow along them; a column hovered in the list: a faint band
+      const hov = !on && ui.hoverCol && ui.hoverCol.id === o.id && ui.hoverCol.ci === ci;
+      if (on || hov) {
         const band = new Path2D();
         if (pv.closed) { pv.A.forEach((q, i) => i ? band.lineTo(q[0], q[1]) : band.moveTo(q[0], q[1])); band.closePath(); pv.B.forEach((q, i) => i ? band.lineTo(q[0], q[1]) : band.moveTo(q[0], q[1])); band.closePath(); }
         else { pv.A.forEach((q, i) => i ? band.lineTo(q[0], q[1]) : band.moveTo(q[0], q[1])); for (let i = pv.B.length - 1; i >= 0; i--) band.lineTo(pv.B[i][0], pv.B[i][1]); band.closePath(); }
-        ctx.fillStyle = 'rgba(255, 196, 0, 0.42)'; ctx.fill(band, 'evenodd');
-        for (const P of [pv.A, pv.B]) { ctx.strokeStyle = 'rgba(255, 176, 0, 0.75)'; ctx.lineWidth = 11 * px; ctx.stroke(line(P, pv.closed)); }
+        ctx.fillStyle = on ? 'rgba(255, 196, 0, 0.42)' : 'rgba(255, 196, 0, 0.2)'; ctx.fill(band, 'evenodd');
+        for (const P of [pv.A, pv.B]) { ctx.strokeStyle = on ? 'rgba(255, 176, 0, 0.75)' : 'rgba(255, 176, 0, 0.35)'; ctx.lineWidth = (on ? 11 : 7) * px; ctx.stroke(line(P, pv.closed)); }
       }
       // stitch direction preview
       ctx.strokeStyle = on ? 'rgba(35,80,212,0.55)' : 'rgba(35,80,212,0.35)'; ctx.lineWidth = 1 * px;
@@ -2737,6 +2738,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     return `<div class="seg" data-param="${name}">${opts.map(([v, l]) => `<button type="button" data-val="${v}" aria-pressed="${String(cur) === String(v)}">${l}</button>`).join('')}</div>`;
   }
   function renderInspector() {
+    ui.hoverCol = null;
     if (ui.reordering) return;
     const box = $('inspector');
     const sel = selected();
@@ -3003,6 +3005,8 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     });
     document.querySelectorAll('.guides li[data-ci]').forEach((li) => {
       const ci = +li.dataset.ci;
+      li.onmouseenter = () => { ui.hoverCol = { id: o.id, ci }; draw(); };
+      li.onmouseleave = () => { if (ui.hoverCol && ui.hoverCol.ci === ci) { ui.hoverCol = null; draw(); } };
       li.onclick = (e) => {
         const b = e.target.closest('button[data-c]');
         if (!b) { ui.active = { kind: 'col', ci }; renderInspector(); draw(); return; }

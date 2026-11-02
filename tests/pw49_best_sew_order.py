@@ -51,6 +51,6 @@ async def main():
         print('reverse with best order on -> auto:', await pg.is_checked('#inspector input[data-param=autoOrder]'), await pg.evaluate(L), 'order kept:', before['ends'][:2] == after['ends'][:2], 'last flipped:', before['ends'][2], '->', after['ends'][2], before['ends'], after['ends'])
         await pg.locator('.guides.cols li').nth(0).locator('[data-c=rev]').click(); await pg.wait_for_timeout(600)
         print('manual reverse of first:', (await pg.evaluate(stat))['ends'][0])
-        await pg.locator('.guides.cols li').nth(1).locator('.gnm').click(); await pg.wait_for_timeout(300); await pg.screenshot(path='/tmp/arrows.png'); await pg.mouse.move(700,450); [await pg.mouse.wheel(0,-300) for _ in range(4)]; await pg.wait_for_timeout(500); await pg.screenshot(path='/tmp/arrows2.png')
+        await pg.locator('.guides.cols li').nth(1).locator('.gnm').click(); await pg.wait_for_timeout(300); await pg.locator('.guides.cols li').nth(2).hover(); await pg.wait_for_timeout(200); print('hover', await pg.evaluate('JSON.stringify(window.__stitchStudio.ui.hoverCol)')); await pg.screenshot(path='/tmp/arrows.png'); await pg.mouse.move(700,450); [await pg.mouse.wheel(0,-300) for _ in range(4)]; await pg.wait_for_timeout(500); await pg.screenshot(path='/tmp/arrows2.png')
         print(errs); await b.close()
 asyncio.run(main())
