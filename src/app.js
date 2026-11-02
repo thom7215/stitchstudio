@@ -2856,6 +2856,15 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const C = o.columns || [];
     const a = ui.active;
     const pvs = colPreviews(o);
+    const auto = !!(o.params || {}).autoOrder;
+    // with "best sew order" on, the list shows the columns in the order they will be sewn
+    let order = C.map((_, i) => ({ ci: i, rev: false }));
+    if (auto && C.length > 1) {
+      try {
+        const plan = Core.columnSewOrder(o.rings, C), seen = new Set(plan.map((q) => q.ci));
+        order = plan.concat(C.map((_, i) => ({ ci: i, rev: false })).filter((q) => !seen.has(q.ci)));
+      } catch (e) { console.error(e); }
+    }
     const railLen = (P) => { let L = 0; for (let i = 1; i < P.length; i++) L += Core.dist(P[i - 1], P[i]); return L; };
     let info = '';
     if (a && C[a.ci] && a.rail !== 'R' && a.kind !== 'bline') {
@@ -2881,10 +2890,11 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         <button type="button" class="small ${ui.tool === 'rung' ? 'primary' : 'ghost'}" aria-pressed="${ui.tool === 'rung'}" id="rungBtn">⟋ Add rungs</button>
       </div>
       ${C.length ? '<div class="row"><button type="button" class="small ghost" id="clearCols">Remove all columns</button></div>' : ''}
+      ${C.length ? `<label class="check" title="Sews the columns in the order, and from the end, that keeps the moves between them shortest. Turn it off to set the order yourself."><input type="checkbox" data-param="autoOrder" ${auto ? 'checked' : ''}> Best sew order</label>` : ''}
       ${C.length ? `<details class="more" id="colsDetails" ${ui.colsOpen ? 'open' : ''}><summary>Columns (${C.length})</summary>
-      ${C.length ? `<ol class="guides cols">${C.map((col, i) => { const pv = pvs[i]; return `<li class="${a && a.ci === i ? 'on' : ''}" data-ci="${i}">
-          <span class="grip" aria-hidden="true">⋮⋮</span><span class="gnum">${colNo(o, i)}</span><span class="gnm">Column ${colNo(o, i)}${col.A.closed && col.B.closed ? ' (loop)' : ''} <small>${pv ? railLen(pv.A).toFixed(0) + ' mm · ' + (col.rungs || []).length + ' rung' + ((col.rungs || []).length === 1 ? '' : 's') : 'unfinished: needs ' + (col.A.pts.length < 2 ? 'its first rail' : 'its second rail')}</small></span>
-          <span class="gact">${pv ? '' : '<button type="button" class="tiny" data-c="cont" title="Keep drawing this column">Continue</button>'}<button type="button" class="tiny ghost" data-c="up" title="Sew earlier" ${i === 0 ? 'disabled' : ''}>↑</button><button type="button" class="tiny ghost" data-c="rev" title="Swap start and end">⇄</button><button type="button" class="tiny ghost" data-c="del" title="Delete column">✕</button></span></li>`; }).join('')}</ol>`
+      ${C.length ? `<ol class="guides cols ${auto ? 'auto' : ''}">${order.map(({ ci: i, rev }) => { const col = C[i], pv = pvs[i]; return `<li class="${a && a.ci === i ? 'on' : ''}" data-ci="${i}">
+          ${auto ? '' : '<span class="grip" aria-hidden="true">⋮⋮</span>'}<span class="gnum">${colNo(o, i)}</span><span class="gnm">Column ${colNo(o, i)}${col.A.closed && col.B.closed ? ' (loop)' : ''} <small>${pv ? railLen(pv.A).toFixed(0) + ' mm · ' + (col.rungs || []).length + ' rung' + ((col.rungs || []).length === 1 ? '' : 's') : 'unfinished: needs ' + (col.A.pts.length < 2 ? 'its first rail' : 'its second rail')}</small></span>
+          <span class="gact">${pv ? '' : '<button type="button" class="tiny" data-c="cont" title="Keep drawing this column">Continue</button>'}${auto ? (rev ? '<span class="revtag" title="Sewn from its end back to its start">⇄</span>' : '') : `<button type="button" class="tiny ghost" data-c="up" title="Sew earlier" ${i === 0 ? 'disabled' : ''}>↑</button><button type="button" class="tiny ghost" data-c="rev" title="Swap start and end">⇄</button>`}<button type="button" class="tiny ghost" data-c="del" title="Delete column">✕</button></span></li>`; }).join('')}</ol>`
         : ''}
       ${a && C[a.ci] && (C[a.ci].rungs || []).length ? `<div class="row"><span class="lbl inline">Rungs in column ${colNo(o, a.ci)}</span>${C[a.ci].rungs.map((_, ri) => `<button type="button" class="tiny ${(a.kind === 'ru' || a.kind === 'rungline') && a.ri === ri ? 'toggle' : 'ghost'}" aria-pressed="${(a.kind === 'ru' || a.kind === 'rungline') && a.ri === ri}" data-rsel="${ri}">${ri + 1}</button>`).join('')}</div>` : ''}
       ${info}
@@ -2898,7 +2908,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     $('rungBtn').onclick = () => setTool(ui.tool === 'rung' ? null : 'rung');
     const cd = $('colsDetails'); if (cd) cd.ontoggle = () => { ui.colsOpen = cd.open; };
     const cc = $('clearCols'); if (cc) cc.onclick = () => { o.columns = []; ui.active = null; touch(o); checkpoint(); changed(); setTool('rail'); };
-    const cl = document.querySelector('.guides.cols');
+    const cl = document.querySelector('.guides.cols:not(.auto)');
     if (cl) sortable(cl, 'li[data-ci]', (from, to) => {
       const [m] = o.columns.splice(from, 1);
       o.columns.splice(to, 0, m);

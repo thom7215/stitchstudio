@@ -324,3 +324,5 @@ body.fontmode #leftTabs, body.fontmode [data-ltab], body.fontmode .steps, body.f
 .playhead[hidden] { display: none; }
 .fontlist.sflist { max-height: 140px; margin-bottom: 6px; }
 #sfSrcList { margin-top: 4px; }
+.guides.cols .revtag { font-size: 12px; color: var(--muted); padding: 0 4px; }
+.guides.cols.auto li { grid-template-columns: 22px 1fr auto; }
