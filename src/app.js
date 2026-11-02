@@ -249,7 +249,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   function updateUndo() { $('undoBtn').disabled = hist.i <= 0 && !canUndoDrawStep(); $('redoBtn').disabled = hist.i >= hist.stack.length - 1; }
 
   /* ---------------- objects ---------------- */
-  function defaultParams() { return { angle: 45, density: 'normal', satinDir: 'follow', satinAngle: 0, underlay: true, pull: null, border: 'none', borderWidth: 1.5, triple: false, runLen: 2.5, spacing: null, curveMode: 'outer', shortAmt: 0.3 }; }
+  function defaultParams() { return { angle: 45, density: 'normal', satinDir: 'columns', satinAngle: 0, underlay: true, pull: null, border: 'none', borderWidth: 1.5, triple: false, runLen: 2.5, spacing: null, curveMode: 'outer', shortAmt: 0.3 }; }
   function makeObj(base) {
     const o = Object.assign({ id: S.nextId++, name: '', kind: 'area', rings: [], paths: [], width: 0, color: '#333333', type: 'fill', auto: true, why: '', params: defaultParams(), text: null }, base);
     o.color = normHex(o.color);
@@ -260,6 +260,8 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const a = Core.analyze(o);
     o.type = a.type; o.why = a.why; o.auto = true;
     if (a.triple != null) o.params.triple = a.triple;
+    // satin shapes start on Manual: you draw the rails (Automatic is one click away)
+    if (o.type === 'satin' && o.kind === 'area') { o.params.satinDir = 'columns'; o.columns = o.columns || []; }
     return a;
   }
   function touch(o) { o.ver = VER++; }
@@ -2778,18 +2780,15 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         <button type="button" class="small ${ui.tool === 'rail' ? 'primary' : 'ghost'}" aria-pressed="${ui.tool === 'rail'}" id="drawColBtn">✎ Add Rails</button>
         <button type="button" class="small ${ui.tool === 'rung' ? 'primary' : 'ghost'}" aria-pressed="${ui.tool === 'rung'}" id="rungBtn">⟋ Add rungs</button>
       </div>
-      
+      ${C.length ? '<div class="row"><button type="button" class="small ghost" id="clearCols">Remove all columns</button></div>' : ''}
+      ${C.length ? `<details class="more" id="colsDetails" ${ui.colsOpen ? 'open' : ''}><summary>Columns (${C.length})</summary>
       ${C.length ? `<ol class="guides cols">${C.map((col, i) => { const pv = pvs[i]; return `<li class="${a && a.ci === i ? 'on' : ''}" data-ci="${i}">
           <span class="grip" aria-hidden="true">⋮⋮</span><span class="gnum">${i + 1}</span><span class="gnm">Column ${i + 1}${col.A.closed && col.B.closed ? ' (loop)' : ''} <small>${pv ? railLen(pv.A).toFixed(0) + ' mm · ' + (col.rungs || []).length + ' rung' + ((col.rungs || []).length === 1 ? '' : 's') : 'unfinished: needs ' + (col.A.pts.length < 2 ? 'its first rail' : 'its second rail')}</small></span>
           <span class="gact">${pv ? '' : '<button type="button" class="tiny" data-c="cont" title="Keep drawing this column">Continue</button>'}<button type="button" class="tiny ghost" data-c="up" title="Sew earlier" ${i === 0 ? 'disabled' : ''}>↑</button><button type="button" class="tiny ghost" data-c="rev" title="Swap start and end">⇄</button><button type="button" class="tiny ghost" data-c="del" title="Delete column">✕</button></span></li>`; }).join('')}</ol>`
         : ''}
       ${a && C[a.ci] && (C[a.ci].rungs || []).length ? `<div class="row"><span class="lbl inline">Rungs in column ${a.ci + 1}</span>${C[a.ci].rungs.map((_, ri) => `<button type="button" class="tiny ${(a.kind === 'ru' || a.kind === 'rungline') && a.ri === ri ? 'toggle' : 'ghost'}" aria-pressed="${(a.kind === 'ru' || a.kind === 'rungline') && a.ri === ri}" data-rsel="${ri}">${ri + 1}</button>`).join('')}</div>` : ''}
       ${info}
-      
-      <div class="row">
-        <button type="button" class="small ghost" id="autoColsBtn">${C.length ? 'Replace with automatic columns' : 'Or let the app suggest columns'}</button>
-        ${C.length ? '<button type="button" class="small ghost" id="clearCols">Remove all columns</button>' : ''}
-      </div>
+      </details>` : ''}
     </div>`;
   }
   function wireColumnPanel(o) {
@@ -2797,8 +2796,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     if (!dc) return;
     dc.onclick = () => { if (ui.tool === 'rail') { keepDraft(); setTool(null); } else setTool('rail'); };
     $('rungBtn').onclick = () => setTool(ui.tool === 'rung' ? null : 'rung');
-    const ac = $('autoColsBtn');
-    if (ac) ac.onclick = () => { o.columns = Core.autoColumns(o.rings, occFor(o), { spacing: fab().satin, margin: 0.3 }); ui.active = null; touch(o); checkpoint(); changed(); };
+    const cd = $('colsDetails'); if (cd) cd.ontoggle = () => { ui.colsOpen = cd.open; };
     const cc = $('clearCols'); if (cc) cc.onclick = () => { o.columns = []; ui.active = null; touch(o); checkpoint(); changed(); setTool('rail'); };
     const cl = document.querySelector('.guides.cols');
     if (cl) sortable(cl, 'li[data-ci]', (from, to) => {
@@ -3541,6 +3539,8 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const o = makeObj({ kind: 'area', color: '#ffffff', name: 'Text: MAKER', text: { ...t, cx: 0, cy: -23, rot: 0, flip: false } });
     await rebuildText(o);
     if (o.rings.length) { autoPick(o); S.objects.push(o); }
+    // the sample shows a finished patch, so its satin is on Automatic
+    for (const q of S.objects) if (q.type === 'satin' && q.kind === 'area') q.params.satinDir = 'follow';
     writeTextForm({ ...t, str: 'Hello', curve: 0, height: 12, spacing: 0 });
     hist.stack = []; hist.i = -1;
     checkpoint(); changed(); fitView();

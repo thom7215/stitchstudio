@@ -9,7 +9,7 @@ async def main():
         await pg.click('#leftTabs [data-tab=text]'); await pg.fill('#txt','Hi'); await pg.click('#addTextBtn')
         await pg.wait_for_function("document.getElementById('busy').hidden"); await pg.wait_for_timeout(600)
         O = "window.__stitchStudio.S.objects.map(o=>o.name.split(' ')[0]+':'+o.type+'/'+o.params.satinDir)"
-        print('auto-digitized:', await pg.evaluate(O))
+        print('auto-digitized (now Manual by default):', await pg.evaluate(O))
         # pick one letter, make it fill, then choose Satin yourself
         await pg.click('#rightTabs [data-tab=order]'); await pg.click('#layers li:nth-child(1)'); await pg.click('#rightTabs [data-tab=stitch]')
         await pg.click('#inspector [data-type=fill]'); await pg.wait_for_timeout(300)
