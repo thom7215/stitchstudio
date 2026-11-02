@@ -1564,7 +1564,27 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const pv = colPreviews(o)[ci];
     if (!pv) return r;
     const R = rungRails(pv, r);
-    return { a: Core.railSnap(R.a, r.a, pv.closed), b: Core.railSnap(R.b, r.b, pv.closed) };
+    // each end goes exactly where the drawn line (carried on past its ends if it falls short) crosses its rail;
+    // the crossing nearest the end that was drawn wins. No crossing at all: the nearest point on the rail.
+    const dx = r.b[0] - r.a[0], dy = r.b[1] - r.a[1];
+    const cross = (P, end) => {
+      const pts = pv.closed ? P.concat([P[0]]) : P;
+      let best = null, bd = Infinity;
+      for (let k = 1; k < pts.length; k++) {
+        const p = pts[k - 1], q = pts[k], ex = q[0] - p[0], ey = q[1] - p[1];
+        const den = dx * ey - dy * ex;
+        if (Math.abs(den) < 1e-12) continue;
+        const u = ((p[0] - r.a[0]) * ey - (p[1] - r.a[1]) * ex) / den; // along the drawn line
+        const v = ((p[0] - r.a[0]) * dy - (p[1] - r.a[1]) * dx) / den; // along the rail segment
+        if (v < 0 || v > 1) continue;
+        const x = [r.a[0] + dx * u, r.a[1] + dy * u], d = Core.dist(x, end);
+        if (d < bd) { bd = d; best = x; }
+      }
+      return best;
+    };
+    const len = Math.hypot(dx, dy) || 1;
+    const pick = (P, end) => { const x = cross(P, end); return x && Core.dist(x, end) < Math.max(3, len) ? x : Core.railSnap(P, end, pv.closed); };
+    return { a: pick(R.a, r.a), b: pick(R.b, r.b) };
   }
   function adjustRung(o, ci, ri, how, amt) {
     const pv = colPreviews(o)[ci];
