@@ -9,7 +9,7 @@ Or open `index.html` (also in `dist/`) in Chrome, Edge, Firefox or Safari. It is
 ## Features
 
 - **Artwork:** drop in an SVG, or type text using any font installed on your computer (or add a font file).
-- **Auto-digitize:** every shape gets satin, fill or outline picked for it automatically.
+- **You choose the stitches:** imported artwork comes in undigitized (Skip); select each shape and pick Satin, Fill or Outline (the Stitch tab shows a suggestion), or use Auto-digitize everything.
 - **Automatic satin, tuned on hand digitizing:** the automatic columns are checked against a font digitized by hand (`samples/Satisfy-stitch.ssfont.json`, run `node tests/autodigitize/eval.js`). Crossing bars (t, H, A, F) run through; strokes that loop over themselves are cut where they cross; stitches fan round the inside of sharp turns instead of crossing; corners are filled to the point; columns are sewn in the order that needs the fewest trims.
 - **Per-part control:** click any letter or SVG part to choose Satin, Fill, Outline or Skip. Satin can be Automatic or Manual.
 - **Manual satin columns:** draw rails along the edges and rungs for the stitch direction. Rails can follow the shape edge, a smooth curve or a straight line (Tab switches), with CorelDRAW-style node handles.

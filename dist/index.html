@@ -4579,7 +4579,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   }
 
   /* ---------------- SVG import ---------------- */
-  function importSVGText(text, fileName) {
+  function importSVGText(text, fileName, autoDigitize) {
     let shapes;
     try { shapes = Importer.importSVG(text); }
     catch (e) { toast(e.message || 'Could not read that SVG.', 5000); return; }
@@ -4604,7 +4604,10 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         o.width = s.width * k;
       }
       o.name = s.name ? s.name.replace(/[-_]+/g, ' ') : `${threadName(o.color)} ${s.kind === 'line' ? 'line' : 'shape'}`;
-      autoPick(o);
+      // imported artwork is not digitized: each shape waits for you to pick how it is stitched
+      // (the Stitch tab shows a suggestion). The sample patch is the exception.
+      if (autoDigitize) autoPick(o);
+      else { o.type = 'skip'; o.auto = false; o.why = 'Not digitized yet: pick Satin, Fill or Outline'; }
       // a big white shape at the bottom is almost always a background
       if (o.kind === 'area' && created.length === 0) {
         const b = objBBox(o);
@@ -7870,7 +7873,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   async function loadSample() {
     S.objects = []; ui.sel = new Set(); ui.editingText = null;
     if (S.hoop === '100x100') { /* fits */ }
-    importSVGText(SAMPLE_SVG, 'sample.svg');
+    importSVGText(SAMPLE_SVG, 'sample.svg', true);
     const base = pickDefaultFont();
     const t = { str: 'MAKER', font: base, bold: true, italic: false, height: 8, spacing: 8, curve: 38 };
     const o = makeObj({ kind: 'area', color: '#ffffff', name: 'Text: MAKER', text: { ...t, cx: 0, cy: -23, rot: 0, flip: false } });
