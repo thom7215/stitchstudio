@@ -39,7 +39,7 @@
 html, body { height: 100%; margin: 0; }
 body { background: var(--bg); color: var(--ink); font: 14px/1.45 var(--body); }
 button, input, select, textarea { font: inherit; color: inherit; }
-#app { height: 100%; display: grid; grid-template-rows: auto 1fr; min-height: 560px; }
+#app { height: 100%; display: grid; grid-template-rows: auto auto 1fr; min-height: 560px; }
 
 /* header */
 .top { display: flex; align-items: center; gap: 20px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
@@ -220,7 +220,11 @@ dialog h2 { font: 700 20px/1.2 var(--display); text-transform: none; letter-spac
 .gact { display: flex; gap: 2px; }
 button.tiny { padding: 2px 7px; font-size: 12px; border-radius: 6px; }
 
-.drawbar { position: absolute; left: 14px; top: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; display: grid; gap: 8px; box-shadow: 0 8px 28px rgb(0 0 0 / .16); max-width: min(430px, calc(100% - 28px)); z-index: 2; }
+.toolbar { display: flex; align-items: center; gap: 6px; padding: 5px 16px; background: var(--panel); border-bottom: 1px solid var(--line); min-height: 40px; box-sizing: border-box; flex-wrap: wrap; }
+.drawbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: 10px; padding-left: 14px; border-left: 1px solid var(--line); }
+.drawbar .seg button { padding: 4px 9px; font-size: 12.5px; }
+.drawbar > b { font-size: 13px; white-space: nowrap; padding: 0 4px; }
+.drawbar button { white-space: nowrap; }
 .drawbar[hidden] { display: none; }
 .dbhead { display: grid; gap: 2px; font-size: 13px; }
 .dbhead span { color: var(--muted); }

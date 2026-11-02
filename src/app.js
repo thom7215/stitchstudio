@@ -1938,15 +1938,15 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const d = ui.colDraft || newColDraft();
     const cur = d[d.stage];
     $('dbFinish').disabled = cur.pts.length < 2;
-    $('dbFinish').textContent = d.stage === 'A' ? '✓ Finish first rail' : '✓ Finish second rail';
+    $('dbFinish').textContent = d.stage === 'A' ? '✓ Finish rail 1' : '✓ Finish rail 2';
     $('dbUndo').disabled = !canUndoDrawStep();
     bar.querySelectorAll('[data-rm]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.rm === ui.railMode));
-    $('dbTitle').textContent = d.border ? `Tracing a satin border · ${ui.borderW.toFixed(1)} mm wide` : `Drawing a satin column · rail ${d.stage === 'A' ? '1' : '2'} of 2`;
+    $('dbTitle').textContent = d.border ? `Border · ${ui.borderW.toFixed(1)} mm` : `Rail ${d.stage === 'A' ? '1' : '2'} of 2`;
     const o = colObj();
     $('dbRungs').hidden = !!d.border;
     $('dbRungs').disabled = !((o && o.columns && o.columns.length) || (d.stage === 'B' && d.B.pts.length >= 2));
     if (d.border) {
-      $('dbFinish').textContent = '✓ Finish this border';
+      $('dbFinish').textContent = '✓ Finish border';
       $('dbStep').textContent = !cur.pts.length ? 'Click where the border should start. Shape edge mode follows the outline.' : 'Keep clicking along the part that should get a border. Click the last dot again (or Enter) to finish; click the first dot to go all the way round.';
       return;
     }
