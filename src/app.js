@@ -2778,9 +2778,10 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
           ${S.objects.length ? `<button id="autoAllBtn" class="primary big">Auto-digitize everything</button>
           ` : ''}
         </div></div>
-        <div class="rtab" data-rtab="borders"><h2>Satin borders</h2></div>
-        <div class="rtab" data-rtab="arrange">${bb ? `<h2>Whole design size</h2>${sizeBoxHTML(bb)}
-        <div class="row"><button class="small ghost" id="fitHoopBtn">Fit to hoop</button><button class="small ghost" id="centerBtn">Centre in hoop</button></div>` : ''}</div>`;
+        <div class="rtab" data-rtab="borders"><h2>Satin borders</h2></div>`;
+      // size and position live in the Objects tab
+      $('objArrange').innerHTML = bb ? `<h2>Whole design size</h2>${sizeBoxHTML(bb)}
+        <div class="row"><button class="small ghost" id="fitHoopBtn">Fit to hoop</button><button class="small ghost" id="centerBtn">Center in hoop</button></div>` : '';
       applyTabs();
       const ab = $('autoAllBtn'); if (ab) ab.onclick = () => autoAll(S.objects);
       wireSizeBox(S.objects);
@@ -2875,14 +2876,15 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       ${more}
       </div>
       <div class="rtab" data-rtab="borders">${!multi && o.kind === 'area' ? borderPanelHTML(o) : `<h2>Satin borders</h2>`}</div>
-      <div class="rtab" data-rtab="arrange">
-      <h2 style="margin-top:6px">Size and position</h2>
+      `;
+    $('objArrange').innerHTML = `
+      <h2>${multi ? sel.length + ' selected' : 'Selected'}: size and position</h2>
       ${sizeBoxHTML(bb)}
       <div class="row">
         <button class="small ghost" id="rotL" title="Rotate left">⟲ 90°</button>
         <button class="small ghost" id="rotR" title="Rotate right">⟳ 90°</button>
         <button class="small ghost" id="flipBtn" title="Mirror">Mirror</button>
-        <button class="small ghost" id="centerSel">Centre</button>
+        <button class="small ghost" id="centerSel">Center</button>
       </div>
       <div class="row">
         ${isText ? '<button class="small" id="editTextBtn">Edit text</button>' : ''}
@@ -2891,7 +2893,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         <button class="small ghost" id="dupBtn">Duplicate</button>
         <button class="small ghost" id="delBtn">Delete</button>
       </div>
-      </div>`;
+`;
     applyTabs();
     box.querySelectorAll('[data-type]').forEach((b) => b.onclick = () => setType(b.dataset.type));
     box.querySelectorAll('.seg[data-param]').forEach((sg) => sg.querySelectorAll('button').forEach((b) => b.onclick = () => {
@@ -3904,7 +3906,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   $('objInvert').onclick = () => { ui.sel = new Set(S.objects.filter((o) => !ui.sel.has(o.id)).map((o) => o.id)); ui.keepTab = true; selectionChanged(); };
   document.querySelectorAll('[data-objtype]').forEach((b) => b.onclick = () => { ui.sel = new Set(S.objects.filter((o) => o.type === b.dataset.objtype).map((o) => o.id)); ui.keepTab = true; selectionChanged(); });
   $('objSearch').oninput = () => renderObjects();
-  try { ui.ltab = localStorage.getItem('ss-ltab') || 'art'; ui.rtab = localStorage.getItem('ss-rtab') || 'stitch'; } catch (e) { ui.ltab = 'art'; ui.rtab = 'stitch'; }
+  try { ui.ltab = localStorage.getItem('ss-ltab') || 'art'; ui.rtab = localStorage.getItem('ss-rtab') || 'stitch'; if (ui.rtab === 'arrange') ui.rtab = 'objects'; } catch (e) { ui.ltab = 'art'; ui.rtab = 'stitch'; }
   function applyTabs() {
     document.querySelectorAll('#leftTabs [data-tab]').forEach((b) => { const on = b.dataset.tab === ui.ltab; b.setAttribute('aria-selected', on); b.tabIndex = on ? 0 : -1; });
     document.querySelectorAll('[data-ltab]').forEach((x) => { x.hidden = x.dataset.ltab !== ui.ltab; });

@@ -29,7 +29,7 @@ async def main():
         hx,hy = await scr(bb[2],(bb[1]+bb[3])/2); hx+=4
         await pg.mouse.move(hx,hy); await pg.mouse.down(); await pg.mouse.move(hx+40,hy,steps=6); await pg.mouse.up(); await pg.wait_for_timeout(1500)
         print('size after side drag', await pg.input_value('#szW'), await pg.input_value('#szH'))
-        await pg.click('#rightTabs [data-tab=arrange]'); await pg.click('[data-pct="50"]'); await pg.wait_for_timeout(1500)
+        await pg.click('#rightTabs [data-tab=objects]'); await pg.click('[data-pct="50"]'); await pg.wait_for_timeout(1500)
         print('after 50%', await pg.input_value('#szW'), await pg.input_value('#szH'))
         await pg.screenshot(path='tests/out/rs2.png')
         print(errs); await b.close()

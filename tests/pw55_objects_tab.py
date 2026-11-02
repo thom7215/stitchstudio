@@ -25,6 +25,7 @@ async def main():
         await pg.click('#objAll'); print('all', await pg.evaluate(sel)); await pg.click('#objInvert'); print('invert', await pg.evaluate(sel))
         await pg.click('[data-objtype=satin]'); print('satin', await pg.evaluate(sel))
         await pg.fill('#objSearch', 'Yo'); await pg.wait_for_timeout(100); print('search Yo:', await rows())
-        await pg.screenshot(path='/tmp/objtab.png')
+        await pg.fill('#objSearch', ''); await pg.click('#objNone'); await pg.wait_for_timeout(200); await pg.screenshot(path='/tmp/objtab0.png')
+        await pg.locator('#objList li.group').nth(0).click(); await pg.wait_for_timeout(200); await pg.screenshot(path='/tmp/objtab.png')
         print(errs); await b.close()
 asyncio.run(main())

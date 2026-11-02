@@ -31,7 +31,7 @@ async def main():
         step('auto'); await tab('right','stitch'); await pg.keyboard.press('Control+a'); await pg.wait_for_timeout(300)
         if await pg.locator('#autoSelBtn').count(): await pg.click('#autoSelBtn'); await pg.wait_for_timeout(1500)
         # --- arrange
-        step('arrange'); await tab('right','arrange')
+        step('arrange'); await tab('right','objects')
         for bt in ['#rotL','#rotR','#flipBtn','#centerSel','#dupBtn']:
             if await pg.locator(bt).count(): await pg.click(bt); await pg.wait_for_timeout(700)
         # --- undo/redo storm
