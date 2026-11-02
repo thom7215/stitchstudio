@@ -22,8 +22,10 @@ async def main():
         q0 = outer[0]; q1 = outer[len(outer)//12]
         await pg.mouse.click(*(await scr(*q0))); await pg.wait_for_timeout(500)
         x,y = await scr(*q1); await pg.mouse.click(x,y); await pg.wait_for_timeout(500)
-        await pg.mouse.click(x+5,y+3); await pg.wait_for_timeout(500)
-        print('three clicks, the last 6 px from the one before:', await pg.evaluate(D))
+        await pg.mouse.move(x+5,y+3); await pg.wait_for_timeout(300)
+        print('red ring showing near the last dot:', await pg.evaluate("(()=>{const S=window.__stitchStudio; const d=S.ui.colDraft, c=d[d.stage], q=c.pts[c.pts.length-1]; return Math.hypot(S.ui.cursor[0]-q[0], S.ui.cursor[1]-q[1]) < 9/S.view.s})()"))
+        print('two dots placed:', await pg.evaluate(D))
+        await pg.mouse.move(x+40, y+40); await pg.wait_for_timeout(200)
         # 2. cursor on the inner edge: the live line jumps to it and follows it
         qi = inner[len(inner)//10]
         await pg.mouse.move(*(await scr(*qi)), steps=5); await pg.wait_for_timeout(300)
@@ -37,7 +39,7 @@ async def main():
         # 3. double-click finishes the rail
         qj = inner[len(inner)//4]
         x,y = await scr(*qj); await pg.mouse.dblclick(x,y); await pg.wait_for_timeout(400)
-        print('after a double-click:', await pg.evaluate(D))
+        print('after a double-click (the second click lands on the new last dot):', await pg.evaluate(D))
         await pg.screenshot(path='tests/out/rail_hop.png')
         print(errs); await b.close()
 asyncio.run(main())

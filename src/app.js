@@ -1866,17 +1866,13 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       if (e.button !== 0) return;
       const d = ui.colDraft || (ui.colDraft = newColDraft());
       const cur = d[d.stage];
+      const tol = 9 / view.s;
       const p = [wx, wy];
-      // every click adds a dot and the line carries on from it; a double-click (or Enter, a right-click,
-      // or the Finish button) finishes the rail, and clicking the first dot closes it into a loop
-      // pointer events do not count clicks, so a double-click is two clicks close together in time and place
-      const now = performance.now(), lc = ui.lastRailClick;
-      const dbl = lc && now - lc.t < 350 && Math.hypot(e.offsetX - lc.x, e.offsetY - lc.y) < 4;
-      ui.lastRailClick = dbl ? null : { t: now, x: e.offsetX, y: e.offsetY };
-      if (dbl) { if (cur.pts.length >= 2) finishRail(); return; }
-      if (cur.pts.length >= 3 && Core.dist(cur.pts[0], p) < 7 / view.s) { finishRail(true); return; }
+      // clicking the last dot (while it shows the red ring) finishes the rail; clicking the first dot closes a loop
+      if (cur.pts.length >= 2 && Core.dist(cur.pts[cur.pts.length - 1], p) < tol) { finishRail(); return; }
+      if (cur.pts.length >= 3 && Core.dist(cur.pts[0], p) < tol) { finishRail(true); return; }
+      if (e.detail >= 2) return;
       const q = placePoint(co, p, ui.railMode);
-      if (cur.pts.length && Core.dist(cur.pts[cur.pts.length - 1], q) < 0.05) return;
       if (cur.pts.length) cur.modes.push(ui.railMode);
       cur.pts.push(q);
       syncDrawBar(); draw();
