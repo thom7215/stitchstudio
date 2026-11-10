@@ -638,9 +638,58 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   }
   async function loadFile(file) {
     if (!file) return;
+    if (/\.exp$/i.test(file.name)) { importEXP(new Uint8Array(await file.arrayBuffer()), file.name); return; }
     const text = await file.text();
     if (/\.json$/i.test(file.name) || text.trim().startsWith('{')) { openProject(text, file.name); return; }
     importSVGText(text, file.name);
+  }
+  /* ---------------- machine files (EXP) ---------------- */
+  // An EXP file holds only needle points, no shapes and no thread colours. Each colour block comes in as one
+  // object that sews its original stitches ("Original"); it can be moved, sized, turned, recoloured, reordered
+  // or deleted, and "Turn into a shape" traces its outline so it can be digitized again.
+  const EXP_COLORS = ['#1d3f8f', '#c8102e', '#f0b323', '#2e8b57', '#7b3fa0', '#e8730c', '#222222', '#6cb4ee', '#d14f8f', '#8a6d3b'];
+  function importEXP(bytes, fileName) {
+    let r;
+    try { r = Formats.readEXP(bytes); } catch (e) { r = null; }
+    if (!r || !r.blocks.length) { toast('That EXP file has no stitches I can read.'); return; }
+    const pts = r.blocks.flat(2);
+    const bb = Core.bbox([pts]);
+    const cx = (bb.x0 + bb.x1) / 2, cy = (bb.y0 + bb.y1) / 2;
+    const groupId = 'exp-' + Date.now().toString(36), groupName = (fileName || 'EXP').replace(/\.exp$/i, '');
+    const created = r.blocks.map((runs, k) => {
+      const o = makeObj({ kind: 'line', color: EXP_COLORS[k % EXP_COLORS.length], group: groupId, groupName });
+      o.paths = runs.map((run) => ({ pts: run.map((q) => [+(q[0] - cx).toFixed(2), +(q[1] - cy).toFixed(2)]), closed: false }));
+      o.width = 0.3; o.type = 'stitches'; o.auto = false; o.imported = 'exp';
+      const n = runs.reduce((a, run) => a + run.length, 0);
+      o.name = `Colour ${k + 1} · ${n.toLocaleString()} stitches`;
+      return o;
+    });
+    S.objects.push(...created);
+    ui.sel = new Set(); ui.editingText = null;
+    checkpoint(); changed(); fitView();
+    const h = hoop();
+    toast(`Read ${r.stitches.toLocaleString()} stitches in ${created.length} colour${created.length === 1 ? '' : 's'}${bb.w > h.w || bb.h > h.h ? '. The design is bigger than this hoop.' : '.'} EXP files don't store thread colours, so pick them yourself.`, 5200);
+  }
+  // trace the area an imported colour block covers, as a shape to digitize again
+  function stitchesToShape(o) {
+    const b = objBBox(o); if (!b) return;
+    const pad = 1, ppm = Math.min(14, 3500 / Math.max(b.w + 2 * pad, b.h + 2 * pad));
+    const W = Math.ceil((b.w + 2 * pad) * ppm), H = Math.ceil((b.h + 2 * pad) * ppm);
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.lineCap = 'round'; g.lineJoin = 'round'; g.strokeStyle = '#000'; g.lineWidth = 0.6 * ppm;
+    const X = (q) => [(q[0] - b.x0 + pad) * ppm, (q[1] - b.y0 + pad) * ppm];
+    for (const p of o.paths) { g.beginPath(); p.pts.forEach((q, i) => { const [x, y] = X(q); if (i) g.lineTo(x, y); else g.moveTo(x, y); }); g.stroke(); }
+    const loops = Importer.traceAlpha(g.getImageData(0, 0, W, H).data, W, H);
+    const rings = loops.map((L) => Core.simplify(L.map(([x, y]) => [x / ppm + b.x0 - pad, y / ppm + b.y0 - pad]), 0.05, true)).filter((rr) => rr.length >= 3 && Math.abs(Core.ringArea(rr)) > 0.05);
+    if (!rings.length) { toast('Could not find an outline in those stitches.'); return; }
+    const n = makeObj({ kind: 'area', color: o.color, group: o.group, groupName: o.groupName });
+    n.rings = rings; n.type = 'skip'; n.auto = false; n.why = 'Not digitized yet: pick Satin, Fill or Outline';
+    n.name = o.name.replace(/ · .*$/, '') + ' · shape';
+    const i = S.objects.indexOf(o);
+    S.objects.splice(i, 1, n);
+    ui.sel = new Set([n.id]);
+    checkpoint(); changed(); selectionChanged();
   }
   function nameFromFile(fn) { return (fn || '').replace(/\.json$/i, '').replace(/-project$/i, '').trim(); }
   function setProjectName(n) {
@@ -2675,6 +2724,8 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const toManual = t === 'satin' ? sel.filter((o) => o.kind === 'area' && o.type !== 'satin') : [];
     for (const o of sel) {
       if (o.kind === 'line' && t === 'fill') continue;
+      // stitches from a machine file are sewn as they are or skipped; other shapes have no original stitches
+      if (o.imported ? !(t === 'stitches' || t === 'skip') : t === 'stitches') continue;
       o.type = t; o.auto = false;
     }
     for (const o of toManual) { o.params.satinDir = 'columns'; o.columns = o.columns || []; touch(o); }
@@ -2721,7 +2772,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     checkpoint(); changed();
   }
   function autoAll(list) {
-    for (const o of list) autoPick(o);
+    for (const o of list) if (!o.imported) autoPick(o);
     checkpoint(); changed();
     
   }
@@ -2753,13 +2804,15 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     fill: '<svg viewBox="0 0 40 30"><rect x="5" y="5" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M5 11 L11 5 M5 17 L17 5 M5 23 L23 5 M9 25 L29 5 M15 25 L35 5 M21 25 L35 11 M27 25 L35 17" stroke="currentColor" stroke-width="1.3"/></svg>',
     running: '<svg viewBox="0 0 40 30"><rect x="6" y="6" width="28" height="18" rx="6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-dasharray="4 2.5"/></svg>',
     skip: '<svg viewBox="0 0 40 30"><circle cx="20" cy="15" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M13.6 21.4 L26.4 8.6" stroke="currentColor" stroke-width="1.6"/></svg>',
+    stitches: '<svg viewBox="0 0 40 30"><path d="M5 22 L11 8 L15 20 L20 9 L24 21 L29 8 L35 22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="11" cy="8" r="1.6" fill="currentColor"/><circle cx="20" cy="9" r="1.6" fill="currentColor"/><circle cx="29" cy="8" r="1.6" fill="currentColor"/></svg>',
   };
-  const TYPE_LABEL = { satin: 'Satin', fill: 'Fill', running: 'Outline', skip: 'Skip' };
+  const TYPE_LABEL = { satin: 'Satin', fill: 'Fill', running: 'Outline', skip: 'Skip', stitches: 'Original' };
   const TYPE_HELP = {
     satin: 'Smooth, shiny zig-zag stitches. Best for letters, borders and narrow shapes up to about 7 mm wide.',
     fill: 'Rows of stitches that cover large areas. Best for anything wider than about 7 mm.',
     running: 'A single line of stitches along the edge. Good for fine details and outlines.',
     skip: 'Leave this shape out. Useful for backgrounds and fabric-coloured areas.',
+    stitches: 'The stitches exactly as they were in the machine file.',
   };
   function angleDial(deg) {
     const a = -deg * Math.PI / 180, x = 17 + Math.cos(a) * 13, y = 17 + Math.sin(a) * 13;
@@ -2796,12 +2849,12 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     }
     const o = sel[0];
     const multi = sel.length > 1;
-    const types = sel.some((q) => q.kind === 'area') ? ['satin', 'fill', 'running', 'skip'] : ['satin', 'running', 'skip'];
+    const types = sel.every((q) => q.imported) ? ['stitches', 'skip'] : sel.some((q) => q.imported) ? ['skip'] : sel.some((q) => q.kind === 'area') ? ['satin', 'fill', 'running', 'skip'] : ['satin', 'running', 'skip'];
     const curType = sel.every((q) => q.type === o.type) ? o.type : null;
     const P = o.params;
     const res = results[S.objects.indexOf(o)];
     const warns = multi ? [] : (res ? res.warn : []);
-    const rec = multi ? null : Core.analyze(o);
+    const rec = multi || o.imported ? null : Core.analyze(o);
     const bb = unionBBox(sel);
     const sizeWarn = !multi && o.type === 'satin' && o.kind === 'area' && rec && rec.type === 'fill' ? 'Wide for satin: long stitches can snag.' : null;
     const fillWarn = !multi && o.type === 'fill' && rec && rec.type === 'satin' ? 'Narrow for fill: satin usually looks better.' : null;
@@ -2867,13 +2920,13 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
           return `<button type="button" class="small ghost" id="selGroup">Select the whole word (${members.length} letters)</button>`;
         }
         if (members.every((q) => ui.sel.has(q.id))) return ``;
-        return `<button type="button" class="small" id="selGroup">Select the whole SVG (${members.length} parts) to resize it</button>`;
+        return `<button type="button" class="small" id="selGroup">Select the whole ${o.imported || /^exp-/.test(o.group) ? "design" : "SVG"} (${members.length} parts) to resize it</button>`;
       })()}
       <div class="rtab" data-rtab="stitch">
       <h2 style="margin-top:6px">Stitch type</h2>
-      <div class="types ${types.length === 3 ? 'three' : ''}">${types.map((t) => `<button type="button" data-type="${t}" aria-pressed="${curType === t}" title="${esc(TYPE_HELP[t])}">${ICONS[t]}${TYPE_LABEL[t]}<span class="kbd">${{ satin: 'S', fill: 'F', running: 'O', skip: 'X' }[t]}</span></button>`).join('')}</div>
+      <div class="types ${types.length === 3 ? 'three' : ''}">${types.map((t) => `<button type="button" data-type="${t}" aria-pressed="${curType === t}" title="${esc(TYPE_HELP[t])}">${ICONS[t]}${TYPE_LABEL[t]}<span class="kbd">${{ satin: 'S', fill: 'F', running: 'O', skip: 'X' }[t] || ''}</span></button>`).join('')}</div>
       ${curType ? `` : ''}
-      ${!multi && rec ? (o.type !== rec.type ? `<div class="rec"><span>Suggested: <b>${TYPE_LABEL[rec.type]}</b></span><button class="link" id="useRec">Use suggestion</button></div>` : '') : `<button class="small ghost" id="autoSelBtn">Let the app pick for these</button>`}
+      ${sel.some((q) => q.imported) ? (multi ? '' : `<div class="row"><button class="small ghost" id="expShapeBtn" title="Trace the area these stitches cover as a shape, then pick Satin, Fill or Outline for it">Turn into a shape to re-digitize</button></div>`) : !multi && rec ? (o.type !== rec.type ? `<div class="rec"><span>Suggested: <b>${TYPE_LABEL[rec.type]}</b></span><button class="link" id="useRec">Use suggestion</button></div>` : '') : `<button class="small ghost" id="autoSelBtn">Let the app pick for these</button>`}
       ${(warns.length || sizeWarn || fillWarn) ? `<div class="warns">${[sizeWarn, fillWarn, ...warns].filter(Boolean).map((w) => `<div class="warn">${esc(w)}</div>`).join('')}</div>` : ''}
       ${opts ? `<div class="opts">${opts}</div>` : ''}
       ${more}
@@ -2921,6 +2974,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     $('selColor').onchange = () => { checkpoint(); changed(); };
     const nm = $('selName'); if (nm) nm.onchange = () => { o.name = nm.value.trim() || o.name; checkpoint(); renderLayers(); };
     const ur = $('useRec'); if (ur) ur.onclick = () => { autoPick(o); checkpoint(); changed(); };
+    const xs = $('expShapeBtn'); if (xs) xs.onclick = () => stitchesToShape(o);
     const as = $('autoSelBtn'); if (as) as.onclick = () => autoAll(sel);
     wireGuidePanel(o);
     wireColumnPanel(o);
