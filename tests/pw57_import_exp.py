@@ -21,5 +21,10 @@ async def main():
         await pg.click('#inspector [data-type=fill]'); await pg.wait_for_function("document.getElementById('busy').hidden", timeout=60000); await pg.wait_for_timeout(300)
         print('re-digitized as fill:', await pg.evaluate(info))
         await pg.screenshot(path='/tmp/exp2.png')
+        names = "window.__stitchStudio.S.objects.map(o => o.name)"
+        await pg.click('#rightTabs [data-tab=objects]'); await pg.locator('#objList li.member', has_text='Colour 4 · part 2').click(); await pg.click('#rightTabs [data-tab=stitch]')
+        await pg.click('#expRunsBtn'); await pg.wait_for_timeout(300); print('every run of colour 4 part 2:', await pg.evaluate(names), 'selected', await pg.evaluate("window.__stitchStudio.ui.sel.size"))
+        await pg.click('#expJoinBtn'); await pg.wait_for_timeout(300); print('joined again:', await pg.evaluate(names))
+        print('stitches still', await pg.evaluate("window.__stitchStudio.assembled().stitches"))
         print(errs); await b.close()
 asyncio.run(main())
