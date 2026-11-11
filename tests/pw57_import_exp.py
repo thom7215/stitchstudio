@@ -1,4 +1,4 @@
-# EXP files open as their colour blocks, sew their original stitches and can be traced into shapes
+# EXP files: separated into pieces, satin read back as editable rails and rungs, fill as a fill
 import asyncio, pathlib
 from playwright.async_api import async_playwright
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -7,24 +7,16 @@ async def main():
         b = await p.chromium.launch(); pg = await b.new_page(viewport={'width':1440,'height':900})
         errs=[]; pg.on('pageerror', lambda e: errs.append(str(e)))
         await pg.goto((ROOT/'index.html').as_uri()); await pg.wait_for_timeout(800)
-        await pg.set_input_files('#fileIn', str(ROOT/'tests'/'sample.exp')); await pg.wait_for_timeout(600)
+        await pg.set_input_files('#fileIn', str(ROOT/'tests'/'sample.exp')); await pg.wait_for_timeout(800)
         await pg.wait_for_function("document.getElementById('busy').hidden", timeout=60000); await pg.wait_for_timeout(300)
-        info = "(() => { const st = window.__stitchStudio; return { objs: st.S.objects.map(o => o.type + ':' + o.name), stitches: st.assembled().stitches, trims: st.assembled().C.filter(c => c === 2).length, colours: st.assembled().colors.length }; })()"
-        print('imported:', await pg.evaluate(info))
-        await pg.screenshot(path='/tmp/exp1.png')
-        # select colour 4 (the text) and look at the Stitch tab
+        D = "window.__stitchStudio.S.objects.map(o => o.type + (o.columns && o.columns.length ? '[' + o.columns.length + ' cols]' : '') + ':' + o.name)"
+        print('imported:', await pg.evaluate(D))
+        # a satin piece: edit a rail dot, then go back to the file's stitches, then rails again
         await pg.click('#rightTabs [data-tab=objects]'); await pg.locator('#objList li.group [data-tw]').click()
-        await pg.locator('#objList li.member').nth(0).click(); await pg.click('#rightTabs [data-tab=stitch]'); await pg.wait_for_timeout(200)
-        print('types offered:', await pg.evaluate("[...document.querySelectorAll('#inspector [data-type]')].map(b => b.dataset.type)"), 'shape button:', await pg.locator('#expShapeBtn').count())
-        await pg.click('#expShapeBtn'); await pg.wait_for_timeout(500); await pg.wait_for_function("document.getElementById('busy').hidden", timeout=60000)
-        print('after turning colour 1 into a shape:', await pg.evaluate("window.__stitchStudio.S.objects.map(o => o.kind + '/' + o.type + ':' + o.name + (o.rings ? ' rings ' + o.rings.length : ''))"))
-        await pg.click('#inspector [data-type=fill]'); await pg.wait_for_function("document.getElementById('busy').hidden", timeout=60000); await pg.wait_for_timeout(300)
-        print('re-digitized as fill:', await pg.evaluate(info))
-        await pg.screenshot(path='/tmp/exp2.png')
-        names = "window.__stitchStudio.S.objects.map(o => o.name)"
-        await pg.click('#rightTabs [data-tab=objects]'); await pg.locator('#objList li.member', has_text='Colour 4 · part 2').click(); await pg.click('#rightTabs [data-tab=stitch]')
-        await pg.click('#expRunsBtn'); await pg.wait_for_timeout(300); print('every run of colour 4 part 2:', await pg.evaluate(names), 'selected', await pg.evaluate("window.__stitchStudio.ui.sel.size"))
-        await pg.click('#expJoinBtn'); await pg.wait_for_timeout(300); print('joined again:', await pg.evaluate(names))
-        print('stitches still', await pg.evaluate("window.__stitchStudio.assembled().stitches"))
+        await pg.locator('#objList li.member', has_text='Colour 3').click(); await pg.click('#rightTabs [data-tab=stitch]'); await pg.wait_for_timeout(200)
+        print('manual columns panel:', await pg.locator('#drawColBtn').count() == 1, 'back button:', await pg.locator('#expBackBtn').count())
+        await pg.click('#expBackBtn'); await pg.wait_for_timeout(300); print('back to file stitches:', await pg.evaluate(D))
+        await pg.click('#expRailsBtn'); await pg.wait_for_timeout(300); print('rails again:', await pg.evaluate(D))
+        await pg.click('#rightTabs [data-tab=objects]'); await pg.click('#objAll'); await pg.click('#rightTabs [data-tab=stitch]'); await pg.wait_for_timeout(300)
         print(errs); await b.close()
 asyncio.run(main())

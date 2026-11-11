@@ -669,10 +669,11 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       });
     });
     S.objects.push(...created);
+    const redone = redigitizeObjects(created.slice());
     ui.sel = new Set(); ui.editingText = null;
     checkpoint(); changed(); fitView();
     const h = hoop();
-    toast(`Read ${r.stitches.toLocaleString()} stitches in ${created.length} colour${created.length === 1 ? '' : 's'}${bb.w > h.w || bb.h > h.h ? '. The design is bigger than this hoop.' : '.'} EXP files don't store thread colours, so pick them yourself.`, 5200);
+    toast(`Read ${r.stitches.toLocaleString()} stitches; ${redone} of ${created.length} part${created.length === 1 ? '' : 's'} now have rails and rungs or a fill you can edit${bb.w > h.w || bb.h > h.h ? '. The design is bigger than this hoop.' : '.'} EXP files don't store thread colours, so pick them yourself.`, 6000);
   }
   // name the parts of each colour of an imported design 1, 2, 3 … in sewing order
   function renumberStitchParts(group) {
@@ -834,18 +835,171 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     ui.sel = new Set([first.id]);
     checkpoint(); changed(); selectionChanged();
   }
+  /* ---- reading the digitizing back out of the stitches ----
+     Satin shows as a zig-zag: each stitch runs back across the one before it, in small steps along the
+     column. Its needle points fall on two sides; those become the two rails, and rungs are added where the
+     stitch angle in the file differs from what the rails alone would give. Underlay (bigger steps) is left
+     out; the app makes its own. A piece sewn as rows of long stitches is a fill, at the rows' angle. */
+  function satinRunsIn(runs) {
+    const out = [];
+    for (const run of runs) {
+      const n = run.length;
+      const v = (i) => [run[i + 1][0] - run[i][0], run[i + 1][1] - run[i][1]];
+      const back = (i) => { // stitch i (run[i] to run[i+1]) turns back across stitch i-1
+        if (i < 1 || i >= n - 1) return false;
+        const a = v(i - 1), b = v(i), la = Math.hypot(...a), lb = Math.hypot(...b);
+        return la >= 0.5 && lb >= 0.5 && (a[0] * b[0] + a[1] * b[1]) / (la * lb) < -0.6;
+      };
+      let s = -1;
+      for (let i = 1; i <= n - 1; i++) {
+        if (back(i)) { if (s < 0) s = i - 1; continue; }
+        if (s >= 0) {
+          const pts = run.slice(s, i + 1);
+          if (pts.length >= 10) {
+            // the top layer steps a little each stitch; zig-zag underlay steps a lot
+            const adv = []; for (let k = 2; k < pts.length; k++) adv.push(Core.dist(pts[k - 2], pts[k]));
+            adv.sort((x, y) => x - y);
+            if (adv[adv.length >> 1] < 1.1) out.push(pts);
+          }
+          s = -1;
+        }
+      }
+    }
+    return out;
+  }
+  function columnFromSatin(pts, rings, n) {
+    const pull = 0.15;
+    const A = [], B = [], st = [];
+    for (let k = 0; k + 1 < pts.length; k++) {
+      const p = pts[k], q = pts[k + 1], L = Core.dist(p, q) || 1, t = Math.min(0.3, pull / L);
+      const a = k % 2 === 0 ? p : q, b = k % 2 === 0 ? q : p;
+      st.push([Core.lerp(a, b, t), Core.lerp(b, a, t)]);
+    }
+    // short stitches (pulled in on the inside of a curve) are not where the edge is: leave them out of the rails
+    const len = st.map((x) => Core.dist(x[0], x[1]));
+    const full = (k) => !(len[k] < 0.82 * Math.max(len[k - 1] || 0, len[k + 1] || 0));
+    for (let k = 0; k < st.length; k++) {
+      if (!full(k) && k > 0 && k < st.length - 1) continue;
+      // a stitch ends on side A at its first point when k is even (rails follow the needle points in order)
+      A.push(st[k][0]); B.push(st[k][1]);
+    }
+    // a rail only goes forward along the column: points that step back (needle points jittering at the edge)
+    // are dropped, and the rest are smoothed a little before the dots are picked
+    const C = A.map((a, i) => Core.lerp(a, B[i], 0.5));
+    const dedupe = (P) => {
+      const keep = [P[0]];
+      for (let i = 1; i < P.length; i++) {
+        const j0 = Math.max(0, i - 3), j1 = Math.min(C.length - 1, i + 3);
+        let tx = C[j1][0] - C[j0][0], ty = C[j1][1] - C[j0][1]; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+        const l = keep[keep.length - 1];
+        if ((P[i][0] - l[0]) * tx + (P[i][1] - l[1]) * ty > 0.12 || i === P.length - 1) keep.push(P[i]);
+      }
+      return keep.map((q, i) => i === 0 || i === keep.length - 1 ? q : [(keep[i - 1][0] + 2 * q[0] + keep[i + 1][0]) / 4, (keep[i - 1][1] + 2 * q[1] + keep[i + 1][1]) / 4]);
+    };
+    const simp = (P0) => { const P = dedupe(P0); const r = Core.simplify(P, (window.__expOpts || {}).simp ?? 0.15, false); return r.length >= 2 ? r : [P[0], P[P.length - 1]]; };
+    const rail = (P) => { const q = simp(P).map((v) => [+v[0].toFixed(3), +v[1].toFixed(3)]); return { pts: q, modes: q.slice(1).map(() => 'curve'), closed: false }; };
+    const col = { A: rail(A), B: rail(B), rungs: [], n };
+    // rungs where the file's stitch angle differs from what the rails give on their own
+    const ang = (u) => Math.atan2(u[1][1] - u[0][1], u[1][0] - u[0][0]);
+    const diff = (x, y) => { let d = Math.abs(x - y) % Math.PI; if (d > Math.PI / 2) d = Math.PI - d; return d * 180 / Math.PI; };
+    const sample = st.filter((_, k) => k % 2 === 0), used = [];
+    const XO = window.__expOpts || {};
+    // how far the stitches the rails and rungs give are from the file's, at each file stitch
+    const errors = () => {
+      let pv = null; try { pv = Core.columnPreview(rings, col); } catch (e) { }
+      if (!pv || !pv.dirs.length) return null;
+      const mids = pv.dirs.map((d) => Core.lerp(d[0], d[1], 0.5));
+      const es = sample.map((s2) => {
+        const m = Core.lerp(s2[0], s2[1], 0.5);
+        let bj = 0, bd = Infinity; mids.forEach((q, j) => { const d = Core.dist(q, m); if (d < bd) { bd = d; bj = j; } });
+        return diff(ang(s2), ang(pv.dirs[bj]));
+      });
+      return { es, mean: es.reduce((x, y) => x + y, 0) / Math.max(1, es.length) };
+    };
+    let cur = errors();
+    for (let it = 0; cur && it < 40 && col.rungs.length < (XO.max ?? 12); it++) {
+      // try the worst places first; keep a rung only if it brings the stitches closer to the file overall
+      const cand = cur.es.map((e, k) => [e, k]).filter(([e, k]) => e >= (XO.thr ?? 6) && k >= 2 && k <= sample.length - 3 && !used.some((u) => Math.abs(u - k) < 4)).sort((x, y) => y[0] - x[0]).slice(0, 4);
+      if (!cand.length) break;
+      let kept = false;
+      for (const [, k] of cand) {
+        used.push(k);
+        // the rung follows the file's stitches around it (the middle of three)
+        const r = sample[k];
+        col.rungs.push({ a: [+r[0][0].toFixed(3), +r[0][1].toFixed(3)], b: [+r[1][0].toFixed(3), +r[1][1].toFixed(3)] });
+        const nx = errors();
+        if (nx && nx.mean < cur.mean - (XO.gain ?? 0.15)) { cur = nx; kept = true; break; }
+        col.rungs.pop();
+      }
+      if (!kept && used.length > sample.length) break;
+    }
+    return col;
+  }
+  function fillAngleOf(runs) {
+    // the direction most of the long stitches run in
+    const bins = new Array(36).fill(0);
+    for (const run of runs) for (let i = 1; i < run.length; i++) {
+      const dx = run[i][0] - run[i - 1][0], dy = run[i][1] - run[i - 1][1], L = Math.hypot(dx, dy);
+      if (L < 1.5) continue;
+      let a = Math.atan2(-dy, dx) * 180 / Math.PI; a = ((a % 180) + 180) % 180;
+      bins[Math.floor(a / 5) % 36] += L;
+    }
+    let bi = 0; bins.forEach((v, i) => { if (v > bins[bi]) bi = i; });
+    const total = bins.reduce((x, y) => x + y, 0);
+    return { angle: bi * 5 + 2.5, share: total ? (bins[bi] + bins[(bi + 1) % 36] + bins[(bi + 35) % 36]) / total : 0 };
+  }
+  // a piece of an imported design as a shape with editable digitizing (or null: keep its original stitches)
+  function redigitizePiece(o) {
+    const runs = o.paths.map((p) => p.pts);
+    const total = runs.reduce((a, r) => a + r.length, 0);
+    const sat = satinRunsIn(runs);
+    const satN = sat.reduce((a, r) => a + r.length, 0);
+    const rings = traceStitchRings(o.paths);
+    if (!rings.length) return null;
+    const n = makeObj({ kind: 'area', color: o.color, group: o.group, groupName: o.groupName });
+    n.rings = rings; n.auto = false; n.name = o.name; n.origPaths = o.paths; n.imported = 'exp-shape';
+    if (sat.length && satN >= total * 0.45) {
+      n.type = 'satin'; n.params.satinDir = 'columns';
+      n.columns = sat.map((pts, i) => columnFromSatin(pts, rings, i + 1));
+      return n;
+    }
+    const fa = fillAngleOf(runs);
+    if (fa.share > 0.55 && total > 40) { n.type = 'fill'; n.params.angle = Math.round(fa.angle); return n; }
+    return null;
+  }
+  function redigitizeObjects(list) {
+    let done = 0;
+    for (const o of list) {
+      const n = redigitizePiece(o);
+      if (!n) continue;
+      S.objects.splice(S.objects.indexOf(o), 1, n);
+      done++;
+    }
+    return done;
+  }
+  // a re-digitized piece back to the stitches it had in the file
+  function backToFileStitches(n) {
+    const o = makeObj({ kind: 'line', color: n.color, group: n.group, groupName: n.groupName });
+    o.paths = n.origPaths; o.width = 0.3; o.type = 'stitches'; o.auto = false; o.imported = 'exp'; o.name = n.name;
+    S.objects.splice(S.objects.indexOf(n), 1, o);
+    ui.sel = new Set([o.id]);
+    checkpoint(); changed(); selectionChanged();
+  }
   // trace the area an imported colour block covers, as a shape to digitize again
-  function stitchesToShape(o) {
-    const b = objBBox(o); if (!b) return;
+  function traceStitchRings(paths) {
+    const b = Core.bbox(paths.map((p) => p.pts)); if (!b || !isFinite(b.x0)) return [];
     const pad = 1, ppm = Math.min(14, 3500 / Math.max(b.w + 2 * pad, b.h + 2 * pad));
     const W = Math.ceil((b.w + 2 * pad) * ppm), H = Math.ceil((b.h + 2 * pad) * ppm);
     const c = document.createElement('canvas'); c.width = W; c.height = H;
     const g = c.getContext('2d', { willReadFrequently: true });
     g.lineCap = 'round'; g.lineJoin = 'round'; g.strokeStyle = '#000'; g.lineWidth = 0.6 * ppm;
     const X = (q) => [(q[0] - b.x0 + pad) * ppm, (q[1] - b.y0 + pad) * ppm];
-    for (const p of o.paths) { g.beginPath(); p.pts.forEach((q, i) => { const [x, y] = X(q); if (i) g.lineTo(x, y); else g.moveTo(x, y); }); g.stroke(); }
+    for (const p of paths) { g.beginPath(); p.pts.forEach((q, i) => { const [x, y] = X(q); if (i) g.lineTo(x, y); else g.moveTo(x, y); }); g.stroke(); }
     const loops = Importer.traceAlpha(g.getImageData(0, 0, W, H).data, W, H);
-    const rings = loops.map((L) => Core.simplify(L.map(([x, y]) => [x / ppm + b.x0 - pad, y / ppm + b.y0 - pad]), 0.05, true)).filter((rr) => rr.length >= 3 && Math.abs(Core.ringArea(rr)) > 0.05);
+    return loops.map((L) => Core.simplify(L.map(([x, y]) => [x / ppm + b.x0 - pad, y / ppm + b.y0 - pad]), 0.05, true)).filter((rr) => rr.length >= 3 && Math.abs(Core.ringArea(rr)) > 0.05);
+  }
+  function stitchesToShape(o) {
+    const rings = traceStitchRings(o.paths);
     if (!rings.length) { toast('Could not find an outline in those stitches.'); return; }
     const n = makeObj({ kind: 'area', color: o.color, group: o.group, groupName: o.groupName });
     n.rings = rings; n.type = 'skip'; n.auto = false; n.why = 'Not digitized yet: pick Satin, Fill or Outline';
@@ -2889,7 +3043,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     for (const o of sel) {
       if (o.kind === 'line' && t === 'fill') continue;
       // stitches from a machine file are sewn as they are or skipped; other shapes have no original stitches
-      if (o.imported ? !(t === 'stitches' || t === 'skip') : t === 'stitches') continue;
+      if (o.imported === 'exp' ? !(t === 'stitches' || t === 'skip') : t === 'stitches') continue;
       o.type = t; o.auto = false;
     }
     for (const o of toManual) { o.params.satinDir = 'columns'; o.columns = o.columns || []; touch(o); }
@@ -2936,7 +3090,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     checkpoint(); changed();
   }
   function autoAll(list) {
-    for (const o of list) if (!o.imported) autoPick(o);
+    for (const o of list) if (o.imported !== 'exp') autoPick(o);
     checkpoint(); changed();
     
   }
@@ -3013,12 +3167,12 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     }
     const o = sel[0];
     const multi = sel.length > 1;
-    const types = sel.every((q) => q.imported) ? ['stitches', 'skip'] : sel.some((q) => q.imported) ? ['skip'] : sel.some((q) => q.kind === 'area') ? ['satin', 'fill', 'running', 'skip'] : ['satin', 'running', 'skip'];
+    const types = sel.every((q) => q.imported === 'exp') ? ['stitches', 'skip'] : sel.some((q) => q.imported === 'exp') ? ['skip'] : sel.some((q) => q.kind === 'area') ? ['satin', 'fill', 'running', 'skip'] : ['satin', 'running', 'skip'];
     const curType = sel.every((q) => q.type === o.type) ? o.type : null;
     const P = o.params;
     const res = results[S.objects.indexOf(o)];
     const warns = multi ? [] : (res ? res.warn : []);
-    const rec = multi || o.imported ? null : Core.analyze(o);
+    const rec = multi || o.imported === 'exp' ? null : Core.analyze(o);
     const bb = unionBBox(sel);
     const sizeWarn = !multi && o.type === 'satin' && o.kind === 'area' && rec && rec.type === 'fill' ? 'Wide for satin: long stitches can snag.' : null;
     const fillWarn = !multi && o.type === 'fill' && rec && rec.type === 'satin' ? 'Narrow for fill: satin usually looks better.' : null;
@@ -3090,7 +3244,8 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       <h2 style="margin-top:6px">Stitch type</h2>
       <div class="types ${types.length === 3 ? 'three' : ''}">${types.map((t) => `<button type="button" data-type="${t}" aria-pressed="${curType === t}" title="${esc(TYPE_HELP[t])}">${ICONS[t]}${TYPE_LABEL[t]}<span class="kbd">${{ satin: 'S', fill: 'F', running: 'O', skip: 'X' }[t] || ''}</span></button>`).join('')}</div>
       ${curType ? `` : ''}
-      ${sel.some((q) => q.imported) ? (multi ? (sel.every((q) => q.imported) ? `<div class="row"><button class="small ghost" id="expJoinBtn" title="Make the selected parts one object again">Join into one</button></div>` : '') : `<div class="row"><button class="small ghost" id="expSplitBtn" title="Make each separate piece of these stitches its own object">Separate pieces</button><button class="small ghost" id="expRunsBtn" title="Make every run of stitches (between jumps and trims) its own object">Every run on its own</button></div><div class="row"><button class="small ghost" id="expShapeBtn" title="Trace the area these stitches cover as a shape, then pick Satin, Fill or Outline for it">Turn into a shape to re-digitize</button></div>`) : !multi && rec ? (o.type !== rec.type ? `<div class="rec"><span>Suggested: <b>${TYPE_LABEL[rec.type]}</b></span><button class="link" id="useRec">Use suggestion</button></div>` : '') : `<button class="small ghost" id="autoSelBtn">Let the app pick for these</button>`}
+      ${!multi && o.origPaths ? `<div class="row"><button class="small ghost" id="expBackBtn" title="Throw away these rails and rungs and sew the stitches exactly as they were in the file">Use the file's stitches</button></div>` : ''}
+      ${sel.some((q) => q.imported === 'exp') ? (multi ? (sel.every((q) => q.imported === 'exp') ? `<div class="row"><button class="small ghost" id="expJoinBtn" title="Make the selected parts one object again">Join into one</button></div>` : '') : `<div class="row"><button class="small ghost" id="expSplitBtn" title="Make each separate piece of these stitches its own object">Separate pieces</button><button class="small ghost" id="expRunsBtn" title="Make every run of stitches (between jumps and trims) its own object">Every run on its own</button></div><div class="row"><button class="small ghost" id="expRailsBtn" title="Read the satin columns in these stitches as rails and rungs you can edit (or a fill)">Make rails and rungs</button><button class="small ghost" id="expShapeBtn" title="Trace the area these stitches cover as a shape, then pick Satin, Fill or Outline for it">Turn into a shape to re-digitize</button></div>`) : !multi && rec ? (o.type !== rec.type ? `<div class="rec"><span>Suggested: <b>${TYPE_LABEL[rec.type]}</b></span><button class="link" id="useRec">Use suggestion</button></div>` : '') : `<button class="small ghost" id="autoSelBtn">Let the app pick for these</button>`}
       ${(warns.length || sizeWarn || fillWarn) ? `<div class="warns">${[sizeWarn, fillWarn, ...warns].filter(Boolean).map((w) => `<div class="warn">${esc(w)}</div>`).join('')}</div>` : ''}
       ${opts ? `<div class="opts">${opts}</div>` : ''}
       ${more}
@@ -3139,6 +3294,8 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const nm = $('selName'); if (nm) nm.onchange = () => { o.name = nm.value.trim() || o.name; checkpoint(); renderLayers(); };
     const ur = $('useRec'); if (ur) ur.onclick = () => { autoPick(o); checkpoint(); changed(); };
     const xs = $('expShapeBtn'); if (xs) xs.onclick = () => stitchesToShape(o);
+    const xb = $('expBackBtn'); if (xb) xb.onclick = () => backToFileStitches(o);
+    const xm = $('expRailsBtn'); if (xm) xm.onclick = () => { const n = redigitizePiece(o); if (!n) { toast('No satin columns or fill rows found in these stitches.'); return; } S.objects.splice(S.objects.indexOf(o), 1, n); ui.sel = new Set([n.id]); checkpoint(); changed(); selectionChanged(); };
     const xp = $('expSplitBtn'); if (xp) xp.onclick = () => splitStitches(o, false);
     const xr = $('expRunsBtn'); if (xr) xr.onclick = () => splitStitches(o, true);
     const xj = $('expJoinBtn'); if (xj) xj.onclick = () => joinStitches(sel);
