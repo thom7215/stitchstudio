@@ -450,5 +450,5 @@ const Importer = (() => {
     const fonts = await window.queryLocalFonts();
     return [...new Set(fonts.map((f) => f.family))].sort((a, b) => a.localeCompare(b));
   }
-  return { importSVG, traceText, detectFonts, queryLocal, parsePath, traceAlpha };
+  return { importSVG, traceText, detectFonts, queryLocal, parsePath };
 })();

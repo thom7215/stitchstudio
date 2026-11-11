@@ -2361,8 +2361,6 @@ const Core = (() => {
       margin: 0.3,
     };
     let segs = [], colPlan = null;
-    // stitches read from a machine file: sewn exactly as they were
-    if (o.type === 'stitches') return { segs: (o.paths || []).filter((q) => q.pts.length >= 2).map((q) => ({ pts: q.pts.map((v) => v.slice()), phase: 'top' })), warn };
     if (o.type === 'skip') {
       if (o.kind === 'area' && o.borders && o.borders.length) segs = genBorders(o.rings, o.borders, { ...P, spacing: fab.satin, underlay: 'light' }).filter((q) => q.pts.length >= 2);
       return { segs, warn };
@@ -2412,7 +2410,7 @@ const Core = (() => {
     const colors = [];
     let cur = null, curColor = null, started = false;
     const push = (p, c, oi) => { X.push(p[0]); Y.push(p[1]); C.push(c); OBJ.push(oi); };
-    const keepWide = (oi) => { const o = objs[oi]; return !!(o && ((o.params && o.params.keepWide) || o.type === 'stitches')); };
+    const keepWide = (oi) => { const o = objs[oi]; return !!(o && o.params && o.params.keepWide); };
     const stitchTo = (p, oi) => {
       if (cur) {
         const d = dist(cur, p);

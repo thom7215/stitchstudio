@@ -644,376 +644,9 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   }
   async function loadFile(file) {
     if (!file) return;
-    if (/\.exp$/i.test(file.name)) { importEXP(new Uint8Array(await file.arrayBuffer()), file.name); return; }
     const text = await file.text();
     if (/\.json$/i.test(file.name) || text.trim().startsWith('{')) { openProject(text, file.name); return; }
     importSVGText(text, file.name);
-  }
-  /* ---------------- machine files (EXP) ---------------- */
-  // An EXP file holds only needle points, no shapes and no thread colours. Each colour block comes in as one
-  // object that sews its original stitches ("Original"); it can be moved, sized, turned, recoloured, reordered
-  // or deleted, and "Turn into a shape" traces its outline so it can be digitized again.
-  const EXP_COLORS = ['#1d3f8f', '#c8102e', '#f0b323', '#2e8b57', '#7b3fa0', '#e8730c', '#222222', '#6cb4ee', '#d14f8f', '#8a6d3b'];
-  function importEXP(bytes, fileName) {
-    let r;
-    try { r = Formats.readEXP(bytes); } catch (e) { r = null; }
-    if (!r || !r.blocks.length) { toast('That EXP file has no stitches I can read.'); return; }
-    const pts = r.blocks.flat(2);
-    const bb = Core.bbox([pts]);
-    const cx = (bb.x0 + bb.x1) / 2, cy = (bb.y0 + bb.y1) / 2;
-    const groupId = 'exp-' + Date.now().toString(36), groupName = (fileName || 'EXP').replace(/\.exp$/i, '');
-    const created = [];
-    r.blocks.forEach((runs, k) => {
-      // each separate piece of a colour (runs whose stitches touch) becomes its own object
-      const pieces = stitchPieces(runs);
-      pieces.forEach((pc, j) => {
-        const o = makeObj({ kind: 'line', color: EXP_COLORS[k % EXP_COLORS.length], group: groupId, groupName });
-        o.paths = pc.map((run) => ({ pts: run.map((q) => [+(q[0] - cx).toFixed(2), +(q[1] - cy).toFixed(2)]), closed: false }));
-        o.width = 0.3; o.type = 'stitches'; o.auto = false; o.imported = 'exp';
-        o.name = stitchObjName(o, k + 1, pieces.length > 1 ? j + 1 : 0);
-        created.push(o);
-      });
-    });
-    S.objects.push(...created);
-    const redone = redigitizeObjects(created.slice());
-    ui.sel = new Set(); ui.editingText = null;
-    checkpoint(); changed(); fitView();
-    const h = hoop();
-    toast(`Read ${r.stitches.toLocaleString()} stitches; ${redone} of ${created.length} part${created.length === 1 ? '' : 's'} now have rails and rungs or a fill you can edit${bb.w > h.w || bb.h > h.h ? '. The design is bigger than this hoop.' : '.'} EXP files don't store thread colours, so pick them yourself.`, 6000);
-  }
-  // name the parts of each colour of an imported design 1, 2, 3 … in sewing order
-  function renumberStitchParts(group) {
-    const byColour = new Map();
-    for (const q of S.objects) if (q.group === group && q.imported && q.kind === 'line') {
-      const c = +((q.name.match(/Colour (\d+)/) || [0, 1])[1]);
-      if (!byColour.has(c)) byColour.set(c, []); byColour.get(c).push(q);
-    }
-    for (const [c, list] of byColour) list.forEach((q, j) => { q.name = stitchObjName(q, c, list.length > 1 ? j + 1 : 0); });
-  }
-  function stitchObjName(o, colour, part) {
-    const n = o.paths.reduce((a, p) => a + p.pts.length, 0);
-    return `Colour ${colour}${part ? ' · part ' + part : ''} · ${n.toLocaleString()} stitches`;
-  }
-  // the grid cells (0.35 mm) a run of stitches passes through
-  let CELL = 0.35;
-  function runCells(run) {
-    const seen = new Set();
-    for (let i = 0; i < run.length; i++) {
-      const a = run[i], b = run[Math.min(i + 1, run.length - 1)], L = Core.dist(a, b), m = Math.max(1, Math.ceil(L / (CELL * 0.6)));
-      for (let t = 0; t <= m; t++) seen.add(Math.floor((a[0] + (b[0] - a[0]) * t / m) / CELL) * 100003 + Math.floor((a[1] + (b[1] - a[1]) * t / m) / CELL));
-    }
-    return seen;
-  }
-  // group runs into pieces: runs whose stitches really overlap (sharing more than a touch) are one piece
-  function clusterRuns(runs) {
-    CELL = 0.5; // fill rows 0.4 mm apart count as touching
-    const parent = runs.map((_, i) => i);
-    const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
-    const cells = runs.map(runCells);
-    const owner = new Map();
-    cells.forEach((cs, ri) => { for (const k of cs) { let o = owner.get(k); if (!o) owner.set(k, o = []); o.push(ri); } });
-    cells.forEach((cs, ri) => {
-      const shared = new Map();
-      for (const k of cs) {
-        const hit = new Set();
-        for (const dk of [0, 1, -1, 100003, -100003]) for (const o of owner.get(k + dk) || []) if (o !== ri) hit.add(o);
-        for (const o of hit) shared.set(o, (shared.get(o) || 0) + 1);
-      }
-      for (const [o, c] of shared) if (c >= Math.max(8, 0.08 * Math.min(cs.size, cells[o].size))) { const x = find(o), y = find(ri); if (x !== y) parent[x] = y; }
-    });
-    CELL = 0.35;
-    return runs.map((_, i) => find(i));
-  }
-  /* Split a colour's stitches into the separate things it sews. Letters and shapes are often joined by
-     travel stitches (a straight run of running stitches from one to the next) with no jump or trim. Each run
-     is cut into its dense parts (satin, fill) and its straight stretches; dense parts that touch are one
-     piece; a straight stretch between two different pieces is travel and is left out (the app makes its own
-     travel or trim when it sews them); a stretch inside one piece (underlay) stays with it. */
-  function stitchPieces(runs) {
-    const parts = []; // { pts, runIdx, kind: 'dense' | 'line' }
-    const runOut = [];
-    runs.forEach((run, ri) => {
-      const n = run.length;
-      const straight = new Array(n).fill(false); // stitch i: from run[i-1] to run[i]
-      for (let i = 1; i < n; i++) {
-        const L = Core.dist(run[i - 1], run[i]);
-        if (L < 0.8 || L > 5.5) continue;
-        const prev = i > 1 ? [run[i - 1][0] - run[i - 2][0], run[i - 1][1] - run[i - 2][1]] : null;
-        const cur = [run[i][0] - run[i - 1][0], run[i][1] - run[i - 1][1]];
-        const nxt = i < n - 1 ? [run[i + 1][0] - run[i][0], run[i + 1][1] - run[i][1]] : null;
-        const cos = (u, v) => (u[0] * v[0] + u[1] * v[1]) / ((Math.hypot(...u) * Math.hypot(...v)) || 1);
-        straight[i] = (!prev || cos(prev, cur) > 0.5) && (!nxt || cos(cur, nxt) > 0.5);
-      }
-      // stretches of at least 4 straight stitches
-      let i = 1, cut = 0;
-      const out = [];
-      while (i < n) {
-        if (!straight[i]) { i++; continue; }
-        let j = i; while (j < n && straight[j]) j++;
-        if (j - i >= 4) {
-          if (i - 1 > cut) out.push({ from: cut, to: i - 1, kind: 'dense' });
-          out.push({ from: i - 1, to: j - 1, kind: 'line' });
-          cut = j - 1;
-        }
-        i = j;
-      }
-      if (cut < n - 1) out.push({ from: cut, to: n - 1, kind: 'dense' });
-      if (out.length === 1) out[0].kind = 'dense';
-      runOut.push(out);
-    });
-    // a straight stretch that runs among other stitches (rows of a fill, underlay inside satin) is part of
-    // what it is in; only one crossing bare fabric is travel
-    const allCells = new Map();
-    runs.forEach((run, ri) => runOut[ri].forEach((o, oi) => { for (const k of runCells(run.slice(o.from, o.to + 1))) { let s2 = allCells.get(k); if (!s2) allCells.set(k, s2 = new Set()); s2.add(ri * 10000 + oi); } }));
-    runs.forEach((run, ri) => {
-      const out = runOut[ri];
-      out.forEach((o, oi) => {
-        if (o.kind !== 'line') return;
-        const cs = runCells(run.slice(o.from, o.to + 1));
-        let near = 0;
-        for (const k of cs) { let any = false; for (const dk of [0, 1, -1, 100003, -100003]) { const s2 = allCells.get(k + dk); if (s2) for (const v of s2) if (v !== ri * 10000 + oi) { any = true; break; } if (any) break; } if (any) near++; }
-        if (near > cs.size * 0.5) o.kind = 'dense';
-      });
-      for (const o of out) parts.push({ pts: run.slice(o.from, o.to + 1), runIdx: ri, kind: o.kind });
-    });
-    // cluster the dense parts (and runs that are only a line of stitches, like an outline)
-    const isAnchor = (pt, k) => pt.kind === 'dense' || !parts.some((q, m) => m !== k && q.runIdx === pt.runIdx && q.kind === 'dense');
-    const anchors = parts.map((pt, k) => isAnchor(pt, k) ? k : -1).filter((k) => k >= 0);
-    const ids = clusterRuns(anchors.map((k) => parts[k].pts));
-    const cl = new Map(anchors.map((k, m) => [k, ids[m]]));
-    // a stretch between two parts of one piece belongs to it; between two pieces it is travel
-    parts.forEach((pt, k) => {
-      if (cl.has(k)) return;
-      const before = parts[k - 1] && parts[k - 1].runIdx === pt.runIdx ? cl.get(k - 1) : undefined;
-      const after = parts[k + 1] && parts[k + 1].runIdx === pt.runIdx ? cl.get(k + 1) : undefined;
-      if (before != null && (after == null || after === before)) cl.set(k, before);
-      else if (after != null && before == null) cl.set(k, after);
-    });
-    // rebuild each piece's runs: consecutive parts of one run in the same piece stay one run
-    const pieces = new Map();
-    let last = null;
-    parts.forEach((pt, k) => {
-      const c = cl.get(k);
-      if (c == null) { last = null; return; }
-      if (!pieces.has(c)) pieces.set(c, []);
-      const list = pieces.get(c);
-      if (last && last.c === c && last.runIdx === pt.runIdx) last.run.push(...pt.pts.slice(1));
-      else { const run = pt.pts.slice(); list.push(run); last = { c, runIdx: pt.runIdx, run }; }
-    });
-    let out = [...pieces.values()].map((list) => list.filter((r) => r.length >= 2)).filter((l) => l.length);
-    // crumbs (a few stitches left at the edge of a fill, a tie-off) go with the piece they are closest to
-    const size = (l) => l.reduce((a, r) => a + r.length, 0);
-    const big = out.filter((l) => size(l) >= 25), small = out.filter((l) => size(l) < 25);
-    if (big.length) for (const l of small) {
-      const c = l[0][0];
-      let best = big[0], bd = Infinity;
-      for (const g of big) for (const r of g) for (let i = 0; i < r.length; i += 3) { const d = Core.dist(c, r[i]); if (d < bd) { bd = d; best = g; } }
-      best.push(...l);
-    }
-    return big.length ? big : out;
-  }
-  // a selected imported object: split it into its separate pieces, or into every single run
-  function splitStitches(o, everyRun) {
-    const pieces = everyRun ? o.paths.map((p) => [p.pts]) : stitchPieces(o.paths.map((p) => p.pts));
-    if (pieces.length < 2) { toast(everyRun ? 'This part is a single run of stitches.' : 'These stitches are all one piece. Try "Every run on its own".'); return; }
-    const colour = +(o.name.match(/Colour (\d+)/) || [0, 1])[1];
-    const made = pieces.map((pc, j) => {
-      const q = makeObj({ kind: 'line', color: o.color, group: o.group, groupName: o.groupName });
-      q.paths = pc.map((pts) => ({ pts, closed: false })); q.width = o.width; q.type = o.type; q.auto = false; q.imported = o.imported; q.params = JSON.parse(JSON.stringify(o.params));
-      q.name = stitchObjName(q, colour, j + 1);
-      return q;
-    });
-    S.objects.splice(S.objects.indexOf(o), 1, ...made);
-    renumberStitchParts(o.group);
-    ui.sel = new Set(made.map((q) => q.id));
-    checkpoint(); changed(); selectionChanged();
-  }
-  // selected imported objects of one colour back into one
-  function joinStitches(list) {
-    const objs = S.objects.filter((q) => list.includes(q));
-    const first = objs[0];
-    first.paths = objs.flatMap((q) => q.paths);
-    const colour = +(first.name.match(/Colour (\d+)/) || [0, 1])[1];
-    first.name = stitchObjName(first, colour, 0);
-    touch(first);
-    S.objects = S.objects.filter((q) => q === first || !objs.includes(q));
-    renumberStitchParts(first.group);
-    ui.sel = new Set([first.id]);
-    checkpoint(); changed(); selectionChanged();
-  }
-  /* ---- reading the digitizing back out of the stitches ----
-     Satin shows as a zig-zag: each stitch runs back across the one before it, in small steps along the
-     column. Its needle points fall on two sides; those become the two rails, and rungs are added where the
-     stitch angle in the file differs from what the rails alone would give. Underlay (bigger steps) is left
-     out; the app makes its own. A piece sewn as rows of long stitches is a fill, at the rows' angle. */
-  function satinRunsIn(runs) {
-    const out = [];
-    for (const run of runs) {
-      const n = run.length;
-      const v = (i) => [run[i + 1][0] - run[i][0], run[i + 1][1] - run[i][1]];
-      const back = (i) => { // stitch i (run[i] to run[i+1]) turns back across stitch i-1
-        if (i < 1 || i >= n - 1) return false;
-        const a = v(i - 1), b = v(i), la = Math.hypot(...a), lb = Math.hypot(...b);
-        return la >= 0.5 && lb >= 0.5 && (a[0] * b[0] + a[1] * b[1]) / (la * lb) < -0.6;
-      };
-      let s = -1;
-      for (let i = 1; i <= n - 1; i++) {
-        if (back(i)) { if (s < 0) s = i - 1; continue; }
-        if (s >= 0) {
-          const pts = run.slice(s, i + 1);
-          if (pts.length >= 10) {
-            // the top layer steps a little each stitch; zig-zag underlay steps a lot
-            const adv = []; for (let k = 2; k < pts.length; k++) adv.push(Core.dist(pts[k - 2], pts[k]));
-            adv.sort((x, y) => x - y);
-            if (adv[adv.length >> 1] < 1.1) out.push(pts);
-          }
-          s = -1;
-        }
-      }
-    }
-    return out;
-  }
-  function columnFromSatin(pts, rings, n) {
-    const pull = 0.15;
-    const A = [], B = [], st = [];
-    for (let k = 0; k + 1 < pts.length; k++) {
-      const p = pts[k], q = pts[k + 1], L = Core.dist(p, q) || 1, t = Math.min(0.3, pull / L);
-      const a = k % 2 === 0 ? p : q, b = k % 2 === 0 ? q : p;
-      st.push([Core.lerp(a, b, t), Core.lerp(b, a, t)]);
-    }
-    // short stitches (pulled in on the inside of a curve) are not where the edge is: leave them out of the rails
-    const len = st.map((x) => Core.dist(x[0], x[1]));
-    const full = (k) => !(len[k] < 0.82 * Math.max(len[k - 1] || 0, len[k + 1] || 0));
-    for (let k = 0; k < st.length; k++) {
-      if (!full(k) && k > 0 && k < st.length - 1) continue;
-      // a stitch ends on side A at its first point when k is even (rails follow the needle points in order)
-      A.push(st[k][0]); B.push(st[k][1]);
-    }
-    // a rail only goes forward along the column: points that step back (needle points jittering at the edge)
-    // are dropped, and the rest are smoothed a little before the dots are picked
-    const C = A.map((a, i) => Core.lerp(a, B[i], 0.5));
-    const dedupe = (P) => {
-      const keep = [P[0]];
-      for (let i = 1; i < P.length; i++) {
-        const j0 = Math.max(0, i - 3), j1 = Math.min(C.length - 1, i + 3);
-        let tx = C[j1][0] - C[j0][0], ty = C[j1][1] - C[j0][1]; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
-        const l = keep[keep.length - 1];
-        if ((P[i][0] - l[0]) * tx + (P[i][1] - l[1]) * ty > 0.12 || i === P.length - 1) keep.push(P[i]);
-      }
-      return keep.map((q, i) => i === 0 || i === keep.length - 1 ? q : [(keep[i - 1][0] + 2 * q[0] + keep[i + 1][0]) / 4, (keep[i - 1][1] + 2 * q[1] + keep[i + 1][1]) / 4]);
-    };
-    const simp = (P0) => { const P = dedupe(P0); const r = Core.simplify(P, (window.__expOpts || {}).simp ?? 0.15, false); return r.length >= 2 ? r : [P[0], P[P.length - 1]]; };
-    const rail = (P) => { const q = simp(P).map((v) => [+v[0].toFixed(3), +v[1].toFixed(3)]); return { pts: q, modes: q.slice(1).map(() => 'curve'), closed: false }; };
-    const col = { A: rail(A), B: rail(B), rungs: [], n };
-    // rungs where the file's stitch angle differs from what the rails give on their own
-    const ang = (u) => Math.atan2(u[1][1] - u[0][1], u[1][0] - u[0][0]);
-    const diff = (x, y) => { let d = Math.abs(x - y) % Math.PI; if (d > Math.PI / 2) d = Math.PI - d; return d * 180 / Math.PI; };
-    const sample = st.filter((_, k) => k % 2 === 0), used = [];
-    const XO = window.__expOpts || {};
-    // how far the stitches the rails and rungs give are from the file's, at each file stitch
-    const errors = () => {
-      let pv = null; try { pv = Core.columnPreview(rings, col); } catch (e) { }
-      if (!pv || !pv.dirs.length) return null;
-      const mids = pv.dirs.map((d) => Core.lerp(d[0], d[1], 0.5));
-      const es = sample.map((s2) => {
-        const m = Core.lerp(s2[0], s2[1], 0.5);
-        let bj = 0, bd = Infinity; mids.forEach((q, j) => { const d = Core.dist(q, m); if (d < bd) { bd = d; bj = j; } });
-        return diff(ang(s2), ang(pv.dirs[bj]));
-      });
-      return { es, mean: es.reduce((x, y) => x + y, 0) / Math.max(1, es.length) };
-    };
-    let cur = errors();
-    for (let it = 0; cur && it < 40 && col.rungs.length < (XO.max ?? 12); it++) {
-      // try the worst places first; keep a rung only if it brings the stitches closer to the file overall
-      const cand = cur.es.map((e, k) => [e, k]).filter(([e, k]) => e >= (XO.thr ?? 6) && k >= 2 && k <= sample.length - 3 && !used.some((u) => Math.abs(u - k) < 4)).sort((x, y) => y[0] - x[0]).slice(0, 4);
-      if (!cand.length) break;
-      let kept = false;
-      for (const [, k] of cand) {
-        used.push(k);
-        // the rung follows the file's stitches around it (the middle of three)
-        const r = sample[k];
-        col.rungs.push({ a: [+r[0][0].toFixed(3), +r[0][1].toFixed(3)], b: [+r[1][0].toFixed(3), +r[1][1].toFixed(3)] });
-        const nx = errors();
-        if (nx && nx.mean < cur.mean - (XO.gain ?? 0.15)) { cur = nx; kept = true; break; }
-        col.rungs.pop();
-      }
-      if (!kept && used.length > sample.length) break;
-    }
-    return col;
-  }
-  function fillAngleOf(runs) {
-    // the direction most of the long stitches run in
-    const bins = new Array(36).fill(0);
-    for (const run of runs) for (let i = 1; i < run.length; i++) {
-      const dx = run[i][0] - run[i - 1][0], dy = run[i][1] - run[i - 1][1], L = Math.hypot(dx, dy);
-      if (L < 1.5) continue;
-      let a = Math.atan2(-dy, dx) * 180 / Math.PI; a = ((a % 180) + 180) % 180;
-      bins[Math.floor(a / 5) % 36] += L;
-    }
-    let bi = 0; bins.forEach((v, i) => { if (v > bins[bi]) bi = i; });
-    const total = bins.reduce((x, y) => x + y, 0);
-    return { angle: bi * 5 + 2.5, share: total ? (bins[bi] + bins[(bi + 1) % 36] + bins[(bi + 35) % 36]) / total : 0 };
-  }
-  // a piece of an imported design as a shape with editable digitizing (or null: keep its original stitches)
-  function redigitizePiece(o) {
-    const runs = o.paths.map((p) => p.pts);
-    const total = runs.reduce((a, r) => a + r.length, 0);
-    const sat = satinRunsIn(runs);
-    const satN = sat.reduce((a, r) => a + r.length, 0);
-    const rings = traceStitchRings(o.paths);
-    if (!rings.length) return null;
-    const n = makeObj({ kind: 'area', color: o.color, group: o.group, groupName: o.groupName });
-    n.rings = rings; n.auto = false; n.name = o.name; n.origPaths = o.paths; n.imported = 'exp-shape';
-    if (sat.length && satN >= total * 0.45) {
-      n.type = 'satin'; n.params.satinDir = 'columns';
-      n.columns = sat.map((pts, i) => columnFromSatin(pts, rings, i + 1));
-      return n;
-    }
-    const fa = fillAngleOf(runs);
-    if (fa.share > 0.55 && total > 40) { n.type = 'fill'; n.params.angle = Math.round(fa.angle); return n; }
-    return null;
-  }
-  function redigitizeObjects(list) {
-    let done = 0;
-    for (const o of list) {
-      const n = redigitizePiece(o);
-      if (!n) continue;
-      S.objects.splice(S.objects.indexOf(o), 1, n);
-      done++;
-    }
-    return done;
-  }
-  // a re-digitized piece back to the stitches it had in the file
-  function backToFileStitches(n) {
-    const o = makeObj({ kind: 'line', color: n.color, group: n.group, groupName: n.groupName });
-    o.paths = n.origPaths; o.width = 0.3; o.type = 'stitches'; o.auto = false; o.imported = 'exp'; o.name = n.name;
-    S.objects.splice(S.objects.indexOf(n), 1, o);
-    ui.sel = new Set([o.id]);
-    checkpoint(); changed(); selectionChanged();
-  }
-  // trace the area an imported colour block covers, as a shape to digitize again
-  function traceStitchRings(paths) {
-    const b = Core.bbox(paths.map((p) => p.pts)); if (!b || !isFinite(b.x0)) return [];
-    const pad = 1, ppm = Math.min(14, 3500 / Math.max(b.w + 2 * pad, b.h + 2 * pad));
-    const W = Math.ceil((b.w + 2 * pad) * ppm), H = Math.ceil((b.h + 2 * pad) * ppm);
-    const c = document.createElement('canvas'); c.width = W; c.height = H;
-    const g = c.getContext('2d', { willReadFrequently: true });
-    g.lineCap = 'round'; g.lineJoin = 'round'; g.strokeStyle = '#000'; g.lineWidth = 0.6 * ppm;
-    const X = (q) => [(q[0] - b.x0 + pad) * ppm, (q[1] - b.y0 + pad) * ppm];
-    for (const p of paths) { g.beginPath(); p.pts.forEach((q, i) => { const [x, y] = X(q); if (i) g.lineTo(x, y); else g.moveTo(x, y); }); g.stroke(); }
-    const loops = Importer.traceAlpha(g.getImageData(0, 0, W, H).data, W, H);
-    return loops.map((L) => Core.simplify(L.map(([x, y]) => [x / ppm + b.x0 - pad, y / ppm + b.y0 - pad]), 0.05, true)).filter((rr) => rr.length >= 3 && Math.abs(Core.ringArea(rr)) > 0.05);
-  }
-  function stitchesToShape(o) {
-    const rings = traceStitchRings(o.paths);
-    if (!rings.length) { toast('Could not find an outline in those stitches.'); return; }
-    const n = makeObj({ kind: 'area', color: o.color, group: o.group, groupName: o.groupName });
-    n.rings = rings; n.type = 'skip'; n.auto = false; n.why = 'Not digitized yet: pick Satin, Fill or Outline';
-    n.name = o.name.replace(/ · .*$/, '') + ' · shape';
-    const i = S.objects.indexOf(o);
-    S.objects.splice(i, 1, n);
-    ui.sel = new Set([n.id]);
-    checkpoint(); changed(); selectionChanged();
   }
   function nameFromFile(fn) { return (fn || '').replace(/\.json$/i, '').replace(/-project$/i, '').trim(); }
   function setProjectName(n) {
@@ -3091,8 +2724,6 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const toManual = t === 'satin' ? sel.filter((o) => o.kind === 'area' && o.type !== 'satin') : [];
     for (const o of sel) {
       if (o.kind === 'line' && t === 'fill') continue;
-      // stitches from a machine file are sewn as they are or skipped; other shapes have no original stitches
-      if (o.imported === 'exp' ? !(t === 'stitches' || t === 'skip') : t === 'stitches') continue;
       o.type = t; o.auto = false;
     }
     for (const o of toManual) { o.params.satinDir = 'columns'; o.columns = o.columns || []; touch(o); }
@@ -3139,7 +2770,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     checkpoint(); changed();
   }
   function autoAll(list) {
-    for (const o of list) if (o.imported !== 'exp') autoPick(o);
+    for (const o of list) autoPick(o);
     checkpoint(); changed();
     
   }
@@ -3171,15 +2802,13 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     fill: '<svg viewBox="0 0 40 30"><rect x="5" y="5" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M5 11 L11 5 M5 17 L17 5 M5 23 L23 5 M9 25 L29 5 M15 25 L35 5 M21 25 L35 11 M27 25 L35 17" stroke="currentColor" stroke-width="1.3"/></svg>',
     running: '<svg viewBox="0 0 40 30"><rect x="6" y="6" width="28" height="18" rx="6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-dasharray="4 2.5"/></svg>',
     skip: '<svg viewBox="0 0 40 30"><circle cx="20" cy="15" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M13.6 21.4 L26.4 8.6" stroke="currentColor" stroke-width="1.6"/></svg>',
-    stitches: '<svg viewBox="0 0 40 30"><path d="M5 22 L11 8 L15 20 L20 9 L24 21 L29 8 L35 22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="11" cy="8" r="1.6" fill="currentColor"/><circle cx="20" cy="9" r="1.6" fill="currentColor"/><circle cx="29" cy="8" r="1.6" fill="currentColor"/></svg>',
   };
-  const TYPE_LABEL = { satin: 'Satin', fill: 'Fill', running: 'Outline', skip: 'Skip', stitches: 'Original' };
+  const TYPE_LABEL = { satin: 'Satin', fill: 'Fill', running: 'Outline', skip: 'Skip' };
   const TYPE_HELP = {
     satin: 'Smooth, shiny zig-zag stitches. Best for letters, borders and narrow shapes up to about 7 mm wide.',
     fill: 'Rows of stitches that cover large areas. Best for anything wider than about 7 mm.',
     running: 'A single line of stitches along the edge. Good for fine details and outlines.',
     skip: 'Leave this shape out. Useful for backgrounds and fabric-coloured areas.',
-    stitches: 'The stitches exactly as they were in the machine file.',
   };
   function angleDial(deg) {
     const a = -deg * Math.PI / 180, x = 17 + Math.cos(a) * 13, y = 17 + Math.sin(a) * 13;
@@ -3216,12 +2845,12 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     }
     const o = sel[0];
     const multi = sel.length > 1;
-    const types = sel.every((q) => q.imported === 'exp') ? ['stitches', 'skip'] : sel.some((q) => q.imported === 'exp') ? ['skip'] : sel.some((q) => q.kind === 'area') ? ['satin', 'fill', 'running', 'skip'] : ['satin', 'running', 'skip'];
+    const types = sel.some((q) => q.kind === 'area') ? ['satin', 'fill', 'running', 'skip'] : ['satin', 'running', 'skip'];
     const curType = sel.every((q) => q.type === o.type) ? o.type : null;
     const P = o.params;
     const res = results[S.objects.indexOf(o)];
     const warns = multi ? [] : (res ? res.warn : []);
-    const rec = multi || o.imported === 'exp' ? null : Core.analyze(o);
+    const rec = multi ? null : Core.analyze(o);
     const bb = unionBBox(sel);
     const sizeWarn = !multi && o.type === 'satin' && o.kind === 'area' && rec && rec.type === 'fill' ? 'Wide for satin: long stitches can snag.' : null;
     const fillWarn = !multi && o.type === 'fill' && rec && rec.type === 'satin' ? 'Narrow for fill: satin usually looks better.' : null;
@@ -3287,14 +2916,13 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
           return `<button type="button" class="small ghost" id="selGroup">Select the whole word (${members.length} letters)</button>`;
         }
         if (members.every((q) => ui.sel.has(q.id))) return ``;
-        return `<button type="button" class="small" id="selGroup">Select the whole ${o.imported || /^exp-/.test(o.group) ? "design" : "SVG"} (${members.length} parts) to resize it</button>`;
+        return `<button type="button" class="small" id="selGroup">Select the whole SVG (${members.length} parts) to resize it</button>`;
       })()}
       <div class="rtab" data-rtab="stitch">
       <h2 style="margin-top:6px">Stitch type</h2>
-      <div class="types ${types.length === 3 ? 'three' : ''}">${types.map((t) => `<button type="button" data-type="${t}" aria-pressed="${curType === t}" title="${esc(TYPE_HELP[t])}">${ICONS[t]}${TYPE_LABEL[t]}<span class="kbd">${{ satin: 'S', fill: 'F', running: 'O', skip: 'X' }[t] || ''}</span></button>`).join('')}</div>
+      <div class="types ${types.length === 3 ? 'three' : ''}">${types.map((t) => `<button type="button" data-type="${t}" aria-pressed="${curType === t}" title="${esc(TYPE_HELP[t])}">${ICONS[t]}${TYPE_LABEL[t]}<span class="kbd">${{ satin: 'S', fill: 'F', running: 'O', skip: 'X' }[t]}</span></button>`).join('')}</div>
       ${curType ? `` : ''}
-      ${!multi && o.origPaths ? `<div class="row"><button class="small ghost" id="expBackBtn" title="Throw away these rails and rungs and sew the stitches exactly as they were in the file">Use the file's stitches</button></div>` : ''}
-      ${sel.some((q) => q.imported === 'exp') ? (multi ? (sel.every((q) => q.imported === 'exp') ? `<div class="row"><button class="small ghost" id="expJoinBtn" title="Make the selected parts one object again">Join into one</button></div>` : '') : `<div class="row"><button class="small ghost" id="expSplitBtn" title="Make each separate piece of these stitches its own object">Separate pieces</button><button class="small ghost" id="expRunsBtn" title="Make every run of stitches (between jumps and trims) its own object">Every run on its own</button></div><div class="row"><button class="small ghost" id="expRailsBtn" title="Read the satin columns in these stitches as rails and rungs you can edit (or a fill)">Make rails and rungs</button><button class="small ghost" id="expShapeBtn" title="Trace the area these stitches cover as a shape, then pick Satin, Fill or Outline for it">Turn into a shape to re-digitize</button></div>`) : !multi && rec ? (o.type !== rec.type ? `<div class="rec"><span>Suggested: <b>${TYPE_LABEL[rec.type]}</b></span><button class="link" id="useRec">Use suggestion</button></div>` : '') : `<button class="small ghost" id="autoSelBtn">Let the app pick for these</button>`}
+      ${!multi && rec ? (o.type !== rec.type ? `<div class="rec"><span>Suggested: <b>${TYPE_LABEL[rec.type]}</b></span><button class="link" id="useRec">Use suggestion</button></div>` : '') : `<button class="small ghost" id="autoSelBtn">Let the app pick for these</button>`}
       ${(warns.length || sizeWarn || fillWarn) ? `<div class="warns">${[sizeWarn, fillWarn, ...warns].filter(Boolean).map((w) => `<div class="warn">${esc(w)}</div>`).join('')}</div>` : ''}
       ${opts ? `<div class="opts">${opts}</div>` : ''}
       ${more}
@@ -3342,12 +2970,6 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     $('selColor').onchange = () => { checkpoint(); changed(); };
     const nm = $('selName'); if (nm) nm.onchange = () => { o.name = nm.value.trim() || o.name; checkpoint(); renderLayers(); };
     const ur = $('useRec'); if (ur) ur.onclick = () => { autoPick(o); checkpoint(); changed(); };
-    const xs = $('expShapeBtn'); if (xs) xs.onclick = () => stitchesToShape(o);
-    const xb = $('expBackBtn'); if (xb) xb.onclick = () => backToFileStitches(o);
-    const xm = $('expRailsBtn'); if (xm) xm.onclick = () => { const n = redigitizePiece(o); if (!n) { toast('No satin columns or fill rows found in these stitches.'); return; } S.objects.splice(S.objects.indexOf(o), 1, n); ui.sel = new Set([n.id]); checkpoint(); changed(); selectionChanged(); };
-    const xp = $('expSplitBtn'); if (xp) xp.onclick = () => splitStitches(o, false);
-    const xr = $('expRunsBtn'); if (xr) xr.onclick = () => splitStitches(o, true);
-    const xj = $('expJoinBtn'); if (xj) xj.onclick = () => joinStitches(sel);
     const as = $('autoSelBtn'); if (as) as.onclick = () => autoAll(sel);
     wireGuidePanel(o);
     wireColumnPanel(o);

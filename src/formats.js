@@ -283,34 +283,6 @@ const Formats = (() => {
     return f.out();
   }
 
-  /* Read a Melco EXP file: pairs of signed bytes (0.1 mm, y up), with 0x80 escapes for colour changes,
-     jumps and trims. Returns the needle points in mm (y down) as colour blocks, each a list of runs
-     (a run ends at a jump or trim). */
-  function readEXP(bytes) {
-    const s8 = (v) => (v > 127 ? v - 256 : v);
-    const blocks = [[]];
-    let x = 0, y = 0, run = null, stitches = 0;
-    const block = () => blocks[blocks.length - 1];
-    const endRun = () => { if (run && run.length >= 2) block().push(run); run = null; };
-    const stitchAt = () => { if (!run) run = [[x, y]]; else run.push([x, y]); stitches++; };
-    for (let i = 0; i + 1 < bytes.length;) {
-      const b0 = bytes[i], b1 = bytes[i + 1];
-      if (b0 !== 0x80) { x += s8(b0) / 10; y -= s8(b1) / 10; stitchAt(); i += 2; continue; }
-      if (i + 3 >= bytes.length) break;
-      const dx = s8(bytes[i + 2]) / 10, dy = -s8(bytes[i + 3]) / 10;
-      i += 4;
-      if (b1 === 0x01) { endRun(); if (block().length) blocks.push([]); x += dx; y += dy; continue; }      // colour change
-      if (b1 === 0x80) { endRun(); continue; }                                                           // trim
-      if (b1 === 0x04 || b1 === 0x02) { if (dx || dy) endRun(); x += dx; y += dy; if (run && !dx && !dy) continue; run = [[x, y]]; continue; } // jump
-      // anything else: treat as a plain move
-      endRun(); x += dx; y += dy;
-    }
-    endRun();
-    // a run that starts with the point it moved to: drop doubled first points
-    const out = blocks.filter((b) => b.length).map((b) => b.map((r) => r.filter((q, k) => !k || q[0] !== r[k - 1][0] || q[1] !== r[k - 1][1])).filter((r) => r.length >= 2));
-    return { blocks: out.filter((b) => b.length), stitches };
-  }
-
   /* ---------------- JEF ---------------- */
   function writeJEF(A) {
     const S = toStitches(A, 127);
@@ -444,6 +416,6 @@ const Formats = (() => {
     return f.out();
   }
 
-  return { writePES, writeDST, writeEXP, readEXP, writeJEF, writeVP3, zip, threadName };
+  return { writePES, writeDST, writeEXP, writeJEF, writeVP3, zip, threadName };
 })();
 if (typeof module !== 'undefined') module.exports = Formats;
