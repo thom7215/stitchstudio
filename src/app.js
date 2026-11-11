@@ -110,19 +110,25 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     bernina: {
       name: 'Bernina',
       export: 'exp',
-      frame: { style: 'screw', m: 9, band: 12, R: 16, mount: 'left' },
-      note: 'Bernina machines read .EXP files; the export picks it for you. Bernette has its own entry in the list.',
+      // Bernina: the coupling on the left, the tightening screw on the right side, arrow marks at the front
+      frame: { style: 'screw', m: 9, band: 12, R: 22, mount: 'left', screw: 'right', arrows: true },
+      note: 'Bernina machines read .EXP files; the export picks it for you. Small, Medium and Large Oval come with the machine; the rest are extras. Bernette has its own entry in the list.',
       hoops: [
-        H('bernina-small', 'Small (50 × 72 mm, oval)', 50, 72, { oval: true, frame: { style: 'oval', m: 6, band: 10 } }),
-        H('bernina-medium', 'Medium (100 × 130 mm)', 100, 130),
-        H('bernina-large-oval', 'Large Oval (145 × 255 mm)', 145, 255, { oval: true, frame: { style: 'oval', m: 8, band: 12 } }),
-        H('bernina-mega', 'Mega Hoop (150 × 400 mm)', 150, 400),
-        H('bernina-midi', 'Midi (165 × 265 mm)', 165, 265),
+        H('bernina-small', 'Small (50 × 72 mm)', 50, 72, { ovalFrame: true, frame: { m: 5, band: 10 } }),
+        H('bernina-medium', 'Medium (100 × 130 mm)', 100, 130, { frame: { R: 24 } }),
+        H('bernina-large-oval', 'Large Oval (145 × 255 mm)', 145, 255, { ovalFrame: true, frame: { m: 6, band: 13 } }),
+        H('bernina-large-freearm', 'Large Freearm (145 × 255 mm)', 145, 255, { frame: { style: 'twist', R: 14 } }),
+        H('bernina-small-clamp', 'Small Clamp (165 × 165 mm)', 165, 165, { frame: { style: 'clamp', m: 6, band: 12, R: 6 } }),
+        H('bernina-medium-clamp', 'Medium Clamp (215 × 215 mm)', 215, 215, { frame: { style: 'clamp', m: 6, band: 12, R: 6 } }),
+        H('bernina-border-clamp', 'Medium Border Clamp (215 × 405 mm)', 215, 405, { frame: { style: 'clamp', m: 6, band: 12, R: 6 } }),
+        H('bernina-midi', 'Midi (165 × 265 mm)', 165, 265, { frame: { style: 'twist', R: 14 } }),
+        H('bernina-mega', 'Mega (150 × 400 mm, 3 positions)', 150, 400, { frame: { R: 14, positions: 3 } }),
+        H('bernina-maxi', 'Maxi (210 × 400 mm)', 210, 400, { frame: { style: 'twist', R: 14 } }),
+        H('bernina-jumbo', 'Jumbo (260 × 400 mm)', 260, 400, { frame: { style: 'twist', R: 14 } }),
+        H('bernina-giant', 'Giant (305 × 410 mm)', 305, 410, { frame: { style: 'twist', R: 12 } }),
         H('bernina-medium-magnetic', 'Medium Magnetic (165 × 265 mm)', 165, 265, { frame: MAG }),
         H('bernina-border-magnetic', 'Medium Border Magnetic (165 × 400 mm)', 165, 400, { frame: MAG }),
-        H('bernina-clamp', 'Clamp Hoop, 7 Series (210 × 215 mm)', 210, 215, { frame: { style: 'clamp', m: 6, band: 12, R: 6 } }),
-        H('bernina-maxi', 'Maxi (210 × 400 mm)', 210, 400),
-        H('bernina-jumbo', 'Jumbo (260 × 400 mm)', 260, 400),
+        H('bernina-large-magnetic', 'Large Magnetic (210 × 400 mm)', 210, 400, { frame: MAG }),
       ],
     },
     bernette: {
@@ -1022,7 +1028,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       if (!d || d.app !== 'stitch-studio' || !Array.isArray(d.objects)) throw new Error();
       setProjectName(d.name || nameFromFile(fileName) || '');
       ui.fileHandle = handle || null;
-      Object.assign(S, { objects: d.objects, hoop: d.hoop || S.hoop, hoopTurn: !!d.hoopTurn, fabric: d.fabric || S.fabric, fabricColor: d.fabricColor || S.fabricColor, knockout: d.knockout !== false, nextId: d.nextId || 1 });
+      Object.assign(S, { objects: d.objects, hoop: (d.hoop === 'bernina-clamp' ? 'bernina-medium-clamp' : d.hoop) || S.hoop, hoopTurn: !!d.hoopTurn, fabric: d.fabric || S.fabric, fabricColor: d.fabricColor || S.fabricColor, knockout: d.knockout !== false, nextId: d.nextId || 1 });
       S.objects.forEach((o) => { o.ver = VER++; S.nextId = Math.max(S.nextId, o.id + 1); });
       ui.sel = new Set(); ui.editingText = null;
       selectionChanged(); // also leaves any drawing tool and forgets selected dots
@@ -1179,7 +1185,17 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const field = new Path2D(), opening = new Path2D(), outer = new Path2D();
     let seam = null;
     const round = hp.round || hp.oval;
-    if (round) {
+    // an oval hoop around a rectangular sewing field (Bernina Small and Large Oval): a rounded oval that
+    // just clears the corners of the field
+    const sup = (path, a, b, n = 3) => { const N = 96; for (let i = 0; i <= N; i++) { const t = i / N * Math.PI * 2, c = Math.cos(t), sn = Math.sin(t); const x = a * Math.sign(c) * Math.abs(c) ** (2 / n), y = b * Math.sign(sn) * Math.abs(sn) ** (2 / n); if (i) path.lineTo(x, y); else path.moveTo(x, y); } path.closePath(); return path; };
+    let ovX = 0, ovY = 0;
+    if (hp.ovalFrame) {
+      const k = 2 ** (1 / 3);
+      ovX = w / 2 * k + m; ovY = h / 2 * k + m;
+      field.rect(-w / 2, -h / 2, w, h);
+      sup(opening, ovX, ovY); sup(outer, ovX + bw, ovY + bw);
+      if (style !== 'magnetic') seam = sup(new Path2D(), ovX + bw * 0.42, ovY + bw * 0.42);
+    } else if (round) {
       field.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
       opening.ellipse(0, 0, ow / 2, oh / 2, 0, 0, Math.PI * 2);
       outer.ellipse(0, 0, ow / 2 + bw, oh / 2 + bw, 0, 0, Math.PI * 2);
@@ -1191,7 +1207,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       rrect(outer, -ow / 2 - bw, -oh / 2 - bw, ow + 2 * bw, oh + 2 * bw, R + bw);
       if (style !== 'magnetic' && style !== 'clamp') { const k = bw * 0.42; seam = rrect(new Path2D(), -ow / 2 - k, -oh / 2 - k, ow + 2 * k, oh + 2 * k, R + k); }
     }
-    const X = ow / 2 + bw, Y = oh / 2 + bw; // outer half extents
+    const X = (hp.ovalFrame ? ovX : ow / 2) + bw, Y = (hp.ovalFrame ? ovY : oh / 2) + bw; // outer half extents
     const parts = [];
     let exL = X, exR = X, exT = Y;
     // where it clips onto the embroidery arm
@@ -1211,8 +1227,26 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         exR = X + bwid;
       }
     }
-    // tension screw on the outer ring
-    if (style === 'screw' || style === 'oval' || style === 'tubular') {
+    // tension screw on the right side (Bernina)
+    if ((style === 'screw' || style === 'oval') && F.screw === 'right') {
+      const sy = hp.ovalFrame ? 0 : Math.min(oh / 2 - Math.min(F.R, oh / 2) - 4, oh * 0.18), sx = X;
+      parts.push({ path: rrect(new Path2D(), sx - 3, sy - 9, 9, 18, 2.5), under: true });
+      const knob = new Path2D(); knob.arc(sx + 7, sy, 6.5, 0, Math.PI * 2);
+      parts.push({ path: knob });
+      const slot = new Path2D(); slot.rect(sx + 6.4, sy - 4, 1.2, 8);
+      parts.push({ path: slot, fill: 'edge' });
+      exR = Math.max(exR, X + 14);
+    } else if (style === 'twist') {
+      // twist-lock: a ribbed knob on the right side
+      const sx = X, sy = 0;
+      parts.push({ path: rrect(new Path2D(), sx - 4, -16, 12, 32, 4), under: true, fill: 'deep' });
+      const knob = new Path2D(); knob.arc(sx + 9, sy, 10, 0, Math.PI * 2);
+      parts.push({ path: knob });
+      const ribs = new Path2D();
+      for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; ribs.moveTo(sx + 9 + Math.cos(a) * 5, sy + Math.sin(a) * 5); ribs.lineTo(sx + 9 + Math.cos(a) * 9, sy + Math.sin(a) * 9); }
+      parts.push({ path: ribs, stroke: true, fill: 'edge' });
+      exR = Math.max(exR, X + 20);
+    } else if (style === 'screw' || style === 'oval' || style === 'tubular') {
       const sx = round ? 0 : Math.max(-ow / 2 + 10, -ow / 2 + Math.min(F.R, ow / 2) + 6), sy = -Y;
       parts.push({ path: rrect(new Path2D(), sx - 8, sy - 6, 16, 9, 2.5), under: true });
       const knob = new Path2D(); knob.arc(sx, sy - 6, 5.5, 0, Math.PI * 2);
@@ -1236,6 +1270,18 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         parts.push({ path: lv, fill: 'deep' });
       }
       exT = Y + 9;
+    }
+    // arrow marks at the front (Bernina: line up the inner and outer hoop)
+    if (F.arrows) {
+      const ar = new Path2D(), yb = (hp.ovalFrame ? ovY : oh / 2) + bw * 0.5;
+      ar.moveTo(-4, yb + 3); ar.lineTo(4, yb + 3); ar.lineTo(0, yb - 3); ar.closePath();
+      parts.push({ path: ar, fill: 'edge' });
+    }
+    // the Mega hoop sews in three positions: marks where they meet
+    if (F.positions > 1) {
+      const pm = new Path2D();
+      for (let i = 1; i < F.positions; i++) { const y = -oh / 2 + oh * i / F.positions; pm.rect(-ow / 2 - bw, y - 1, bw * 0.55, 2); pm.rect(ow / 2 + bw * 0.45, y - 1, bw * 0.55, 2); }
+      parts.push({ path: pm, fill: 'edge' });
     }
     const notches = [];
     const n = Math.min(5, bw * 0.45);
@@ -1391,7 +1437,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     if (h.turned) ctx.rotate(Math.PI / 2);
     // shadow under the frame
     ctx.save(); ctx.translate(0.8, 1.4); ctx.fillStyle = dark ? 'rgba(0,0,0,0.45)' : 'rgba(30,40,60,0.16)';
-    ctx.fill(G.outer); G.parts.forEach((q) => ctx.fill(q.path)); ctx.restore();
+    ctx.fill(G.outer); G.parts.forEach((q) => { if (!q.stroke) ctx.fill(q.path); }); ctx.restore();
     // fabric in the opening
     ctx.fillStyle = S.fabricColor;
     ctx.fill(G.opening);
@@ -1427,7 +1473,10 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     ctx.lineWidth = 1.2 / s; ctx.strokeStyle = edge;
     ctx.stroke(G.outer); ctx.stroke(G.opening);
     if (G.seam) { ctx.lineWidth = 0.8 / s; ctx.strokeStyle = deep; ctx.stroke(G.seam); }
-    for (const q of G.parts) if (!q.under) { ctx.fillStyle = q.fill === 'deep' ? deep : q.fill === 'edge' ? edge : body; ctx.fill(q.path); ctx.lineWidth = 1 / s; ctx.strokeStyle = edge; ctx.stroke(q.path); }
+    for (const q of G.parts) if (!q.under) {
+      if (q.stroke) { ctx.lineWidth = 1.4 / s * Math.max(1, s / 4); ctx.strokeStyle = edge; ctx.stroke(q.path); continue; }
+      ctx.fillStyle = q.fill === 'deep' ? deep : q.fill === 'edge' ? edge : body; ctx.fill(q.path); ctx.lineWidth = 1 / s; ctx.strokeStyle = edge; ctx.stroke(q.path);
+    }
     // centre notches on the frame
     ctx.lineWidth = 1.4 / s; ctx.strokeStyle = mag ? '#c9ced6' : edge;
     ctx.beginPath();
@@ -4171,6 +4220,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     try {
       const d = JSON.parse(localStorage.getItem('ss-setup') || 'null');
       if (!d) return;
+      if (d.hoop === 'bernina-clamp') d.hoop = 'bernina-medium-clamp'; // renamed
       if (HOOPS.some((h) => h.id === d.hoop)) { S.hoop = d.hoop; S.hoopTurn = !!d.hoopTurn; }
       if (FABRICS[d.fabric]) S.fabric = d.fabric;
       if (/^#[0-9a-f]{6}$/i.test(d.fabricColor || '')) S.fabricColor = d.fabricColor;
