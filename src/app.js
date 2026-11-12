@@ -821,8 +821,25 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     // an oval hoop around a rectangular sewing field (Bernina Small and Large Oval): a rounded oval that
     // just clears the corners of the field
     const sup = (path, a, b, n = 3) => { const N = 96; for (let i = 0; i <= N; i++) { const t = i / N * Math.PI * 2, c = Math.cos(t), sn = Math.sin(t); const x = a * Math.sign(c) * Math.abs(c) ** (2 / n), y = b * Math.sign(sn) * Math.abs(sn) ** (2 / n); if (i) path.lineTo(x, y); else path.moveTo(x, y); } path.closePath(); return path; };
-    let ovX = 0, ovY = 0;
-    if (hp.ovalFrame) {
+    let ovX = 0, ovY = 0, twist = null;
+    if (style === 'twist' && !round) {
+      // Bernina twist-lock hoops (Midi, Maxi, Jumbo…): a rounded-oblong opening with very round corners that
+      // just clear the sewing field, a black inner ring, a white outer frame, the coupling bar on the left
+      // and the twist knob on a lobe at the bottom right
+      const rk = 0.34;
+      let mm = 3;
+      for (; mm < 60; mm += 0.5) {
+        const a = w / 2 + mm, b = h / 2 + mm, R = rk * 2 * a;
+        const dx = Math.max(0, w / 2 - (a - R)), dy = Math.max(0, h / 2 - (b - R));
+        if (Math.hypot(dx, dy) <= R - 2) break;
+      }
+      const a = w / 2 + mm, b = h / 2 + mm, R = rk * 2 * a, ring = 7, white = 10;
+      twist = { a, b, R, ring, white };
+      field.rect(-w / 2, -h / 2, w, h);
+      rrect(opening, -a, -b, 2 * a, 2 * b, R);
+      rrect(outer, -a - ring - white, -b - ring - white, 2 * (a + ring + white), 2 * (b + ring + white), R + ring + white);
+      seam = null;
+    } else if (hp.ovalFrame) {
       const k = 2 ** (1 / 3);
       ovX = w / 2 * k + m; ovY = h / 2 * k + m;
       field.rect(-w / 2, -h / 2, w, h);
@@ -840,11 +857,39 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       rrect(outer, -ow / 2 - bw, -oh / 2 - bw, ow + 2 * bw, oh + 2 * bw, R + bw);
       if (style !== 'magnetic' && style !== 'clamp') { const k = bw * 0.42; seam = rrect(new Path2D(), -ow / 2 - k, -oh / 2 - k, ow + 2 * k, oh + 2 * k, R + k); }
     }
-    const X = (hp.ovalFrame ? ovX : ow / 2) + bw, Y = (hp.ovalFrame ? ovY : oh / 2) + bw; // outer half extents
+    const X = twist ? twist.a + twist.ring + twist.white : (hp.ovalFrame ? ovX : ow / 2) + bw, Y = twist ? twist.b + twist.ring + twist.white : (hp.ovalFrame ? ovY : oh / 2) + bw; // outer half extents
     const parts = [];
     let exL = X, exR = X, exT = Y;
+    if (twist) {
+      const { a, b, R, ring } = twist;
+      // black inner ring
+      const rg = new Path2D(); rrect(rg, -a - ring, -b - ring, 2 * (a + ring), 2 * (b + ring), R + ring); rrect(rg, -a, -b, 2 * a, 2 * b, R);
+      parts.push({ path: rg, fill: 'black', evenodd: true });
+      // template clips at the middle of each side
+      const clips = new Path2D();
+      for (const [x, y, hz] of [[0, -b, 0], [0, b, 0], [-a, 0, 1], [a, 0, 1]]) { if (hz) rrect(clips, x - 4, y - 5, 8, 10, 1.5); else rrect(clips, x - 5, y - 4, 10, 8, 1.5); }
+      parts.push({ path: clips, fill: 'deep' });
+      // the coupling: a long metal bar on the left side
+      const ch = Math.min(oh * 0.5, 2 * b * 0.45);
+      parts.push({ path: rrect(new Path2D(), -X - 7, -ch * 0.62, 9, ch, 1.5), under: true, fill: 'metal' });
+      const lugs = new Path2D();
+      for (const y of [-ch * 0.62 + ch * 0.18, -ch * 0.62 + ch * 0.62]) lugs.rect(-X - 9, y, 4, 4);
+      parts.push({ path: lugs, fill: 'deep' });
+      // the twist knob on a lobe at the bottom right
+      const Ro = R + twist.ring + twist.white, kr = Math.min(18, X * 0.15), ang = 52 * Math.PI / 180;
+      const kx = X - Ro + Math.cos(ang) * (Ro + kr * 0.25), ky = Y - Ro + Math.sin(ang) * (Ro + kr * 0.25);
+      const lobe = new Path2D(); lobe.arc(kx, ky, kr * 1.45, 0, Math.PI * 2);
+      parts.push({ path: lobe, under: true, outside: true });
+      const knob = new Path2D(), N = 7;
+      for (let i = 0; i <= N * 2; i++) { const t = i / (N * 2) * Math.PI * 2, rr = i % 2 ? kr * 0.82 : kr; const x = kx + Math.cos(t) * rr, y = ky + Math.sin(t) * rr; if (i) knob.lineTo(x, y); else knob.moveTo(x, y); }
+      knob.closePath();
+      parts.push({ path: knob });
+      const hub = new Path2D(); hub.arc(kx, ky, kr * 0.45, 0, Math.PI * 2);
+      parts.push({ path: hub, fill: 'deep' });
+      exL = X + 9; exR = Math.max(exR, kx + kr * 1.45 + 2); exT = Math.max(Y, ky + kr * 1.45 + 2);
+    }
     // where it clips onto the embroidery arm
-    if (F.mount === 'left' || F.mount === 'both') {
+    if (!twist && (F.mount === 'left' || F.mount === 'both')) {
       const bh = Math.min(70, Math.max(26, oh * 0.42)), bwid = 20;
       const p = rrect(new Path2D(), -X - bwid, -bh / 2, bwid + bw * 0.6, bh, 3);
       parts.push({ path: p, under: true, fill: 'deep' });
@@ -869,7 +914,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       const slot = new Path2D(); slot.rect(sx + 6.4, sy - 4, 1.2, 8);
       parts.push({ path: slot, fill: 'edge' });
       exR = Math.max(exR, X + 14);
-    } else if (style === 'twist') {
+    } else if (style === 'twist' && !twist) {
       // twist-lock: a ribbed knob on the right side
       const sx = X, sy = 0;
       parts.push({ path: rrect(new Path2D(), sx - 4, -16, 12, 32, 4), under: true, fill: 'deep' });
@@ -906,7 +951,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     }
     // arrow marks at the front (Bernina: line up the inner and outer hoop)
     if (F.arrows) {
-      const ar = new Path2D(), yb = (hp.ovalFrame ? ovY : oh / 2) + bw * 0.5;
+      const ar = new Path2D(), yb = twist ? twist.b + twist.ring + twist.white * 0.5 : (hp.ovalFrame ? ovY : oh / 2) + bw * 0.5;
       ar.moveTo(-4, yb + 3); ar.lineTo(4, yb + 3); ar.lineTo(0, yb - 3); ar.closePath();
       parts.push({ path: ar, fill: 'edge' });
     }
@@ -923,7 +968,8 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     // extents on screen (after turning)
     const ex = hp.turned ? Math.max(Y, exT) : Math.max(exL, exR);
     const ey = hp.turned ? Math.max(exL, exR) : Math.max(exT, Y);
-    return { field, opening, outer, seam, parts, notches, style, ow, oh, ex, ey };
+    if (twist) notches.length = 0;
+    return { field, opening, outer, seam, parts, notches, style, ow: twist ? 2 * twist.a : ow, oh: twist ? 2 * twist.b : oh, ex, ey };
   }
 
   /* ---------------- realistic thread preview ---------------- */
@@ -1101,14 +1147,24 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     const edge = mag ? (dark ? '#14161a' : '#1c1f24') : (dark ? '#646d7d' : '#9aa2ae');
     const deep = mag ? '#5b616b' : (dark ? '#2a3039' : '#d5d9df');
     const band = new Path2D(); band.addPath(G.outer); band.addPath(G.opening);
-    for (const q of G.parts) if (q.under) { ctx.fillStyle = q.fill === 'deep' ? deep : body; ctx.fill(q.path); ctx.lineWidth = 1 / s; ctx.strokeStyle = edge; ctx.stroke(q.path); }
+    const metal = dark ? '#7b828d' : '#b9bdc3', black = dark ? '#111214' : '#24262a';
+    const fillOf = (q) => q.fill === 'deep' ? deep : q.fill === 'edge' ? edge : q.fill === 'metal' ? metal : q.fill === 'black' ? black : body;
+    for (const q of G.parts) if (q.under) {
+      ctx.fillStyle = fillOf(q); ctx.fill(q.path); ctx.lineWidth = 1 / s; ctx.strokeStyle = edge;
+      // a part that grows out of the frame: only its outline outside the frame shows
+      if (q.outside) { ctx.save(); const cp = new Path2D(); cp.rect(-1e4, -1e4, 2e4, 2e4); cp.addPath(G.outer); ctx.clip(cp, 'evenodd'); ctx.stroke(q.path); ctx.restore(); }
+      else ctx.stroke(q.path);
+    }
     ctx.fillStyle = body; ctx.fill(band, 'evenodd');
     ctx.lineWidth = 1.2 / s; ctx.strokeStyle = edge;
-    ctx.stroke(G.outer); ctx.stroke(G.opening);
+    const lobes = G.parts.filter((q) => q.outside);
+    if (lobes.length) { ctx.save(); const cp = new Path2D(); cp.rect(-1e4, -1e4, 2e4, 2e4); lobes.forEach((q) => cp.addPath(q.path)); ctx.clip(cp, 'evenodd'); ctx.stroke(G.outer); ctx.restore(); }
+    else ctx.stroke(G.outer);
+    ctx.stroke(G.opening);
     if (G.seam) { ctx.lineWidth = 0.8 / s; ctx.strokeStyle = deep; ctx.stroke(G.seam); }
     for (const q of G.parts) if (!q.under) {
       if (q.stroke) { ctx.lineWidth = 1.4 / s * Math.max(1, s / 4); ctx.strokeStyle = edge; ctx.stroke(q.path); continue; }
-      ctx.fillStyle = q.fill === 'deep' ? deep : q.fill === 'edge' ? edge : body; ctx.fill(q.path); ctx.lineWidth = 1 / s; ctx.strokeStyle = edge; ctx.stroke(q.path);
+      ctx.fillStyle = fillOf(q); ctx.fill(q.path, q.evenodd ? 'evenodd' : 'nonzero'); ctx.lineWidth = 1 / s; ctx.strokeStyle = q.fill === 'black' ? black : edge; ctx.stroke(q.path);
     }
     // centre notches on the frame
     ctx.lineWidth = 1.4 / s; ctx.strokeStyle = mag ? '#c9ced6' : edge;
