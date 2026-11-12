@@ -4790,7 +4790,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     requestAnimationFrame(() => {
       drawQueued = false;
       if (fast && play.ok && play.key === playKey()) { paintPlayFrame(); return; }
-      paint(); updateScrollbars();
+      paint(); paintMarquee(); updateScrollbars();
       // a full redraw while playing: later frames add to it
       play.ok = !!(ui.playing && A); play.key = playKey();
       if (play.ok) { const n = A.X.length; play.lim = ui.sim >= 1 ? n : Math.max(1, Math.floor(ui.sim * n)); playMarker(play.lim < n ? play.lim - 1 : null); }
@@ -6247,10 +6247,21 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       if (!ui.sel.has(o.id)) { ui.sel = new Set([o.id]); selectionChanged(); }
       if (ui.active) { ui.active = null; renderInspector(); }
       dragState = { mode: 'move', x: e.offsetX, y: e.offsetY, dx: 0, dy: 0, moving: false, narrow };
+    } else if (e.button === 0) {
+      // drag on empty canvas: a box that selects what lies inside it (the middle button moves the view)
+      dragState = { mode: 'box', x: e.offsetX, y: e.offsetY, x1: e.offsetX, y1: e.offsetY, moved: false, add: e.shiftKey || e.metaKey || e.ctrlKey };
     } else {
       dragState = { mode: 'pan', x: e.offsetX, y: e.offsetY, ox: view.ox, oy: view.oy, moved: false };
     }
   });
+  function paintMarquee() {
+    if (!dragState || dragState.mode !== 'box' || !dragState.moved) return;
+    const d = dragState, x = Math.min(d.x, d.x1), y = Math.min(d.y, d.y1), w = Math.abs(d.x1 - d.x), h = Math.abs(d.y1 - d.y);
+    ctx.save(); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = 'rgba(35, 80, 212, 0.10)'; ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = 'rgba(35, 80, 212, 0.9)'; ctx.lineWidth = 1; ctx.setLineDash([5, 3]); ctx.strokeRect(x + 0.5, y + 0.5, w, h);
+    ctx.restore();
+  }
   cv.addEventListener('dblclick', (e) => {
     const co = colObj();
     if (co && !ui.tool) {
@@ -6338,7 +6349,11 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       return;
     }
     const dx = e.offsetX - dragState.x, dy = e.offsetY - dragState.y;
-    if (dragState.mode === 'pan') {
+    if (dragState.mode === 'box') {
+      if (Math.abs(dx) + Math.abs(dy) > 3) dragState.moved = true;
+      dragState.x1 = e.offsetX; dragState.y1 = e.offsetY;
+      draw();
+    } else if (dragState.mode === 'pan') {
       if (Math.abs(dx) + Math.abs(dy) > 3) dragState.moved = true;
       view.ox = dragState.ox + dx; view.oy = dragState.oy + dy;
       cv.style.cursor = 'grabbing';
@@ -6553,7 +6568,19 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       } else draw();
       return;
     }
-    if (dragState.mode === 'pan' && !dragState.moved && e.type === 'pointerup') {
+    if (dragState.mode === 'box' && e.type === 'pointerup') {
+      const d = dragState;
+      if (!d.moved) { if (ui.sel.size && !d.add) { ui.sel = new Set(); selectionChanged(); } }
+      else {
+        // everything that lies wholly inside the box
+        const [ax, ay] = toWorld(Math.min(d.x, d.x1), Math.min(d.y, d.y1)), [bx, by] = toWorld(Math.max(d.x, d.x1), Math.max(d.y, d.y1));
+        const inside = S.objects.filter((o) => { const b = objBBox(o); return b && b.x0 >= ax && b.x1 <= bx && b.y0 >= ay && b.y1 <= by; });
+        ui.sel = d.add ? new Set([...ui.sel, ...inside.map((o) => o.id)]) : new Set(inside.map((o) => o.id));
+        dragState = null;
+        selectionChanged();
+      }
+    }
+    if (dragState && dragState.mode === 'pan' && !dragState.moved && e.type === 'pointerup') {
       if (ui.sel.size) { ui.sel = new Set(); selectionChanged(); }
     }
     dragState = null;
@@ -6930,6 +6957,10 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         <button class="small ghost" id="flipBtn" title="Mirror">Mirror</button>
         <button class="small ghost" id="centerSel">Center</button>
       </div>
+      <div class="row"><span class="lbl inline">Align centers</span>
+        <button class="small ghost" id="alignH" title="${multi ? 'Line up the centers left to right (on one vertical line)' : 'Center in the hoop from left to right'}">⇹ Horizontal</button>
+        <button class="small ghost" id="alignV" title="${multi ? 'Line up the centers top to bottom (on one horizontal line)' : 'Center in the hoop from top to bottom'}">⇳ Vertical</button>
+      </div>
       <div class="row">
         <button class="small ghost" id="fitSelBtn" title="Make the selection as big as fits in the hoop, in the middle">Fit to hoop</button>
         <button class="small ghost" id="dupBtn">Duplicate</button>
@@ -6978,6 +7009,19 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     $('rotR').onclick = async () => { const [x, y] = c(); await rotate(selected(), 90, x, y); checkpoint(); changed(); };
     $('flipBtn').onclick = async () => { const [x] = c(); await flip(selected(), x); checkpoint(); changed(); };
     $('centerSel').onclick = () => { const [x, y] = c(); translate(selected(), -x, -y); checkpoint(); changed(); };
+    // centre alignment: several objects line up on the selection's centre (words move as one); one object or one
+    // word lines up on the hoop's centre
+    const alignSel = (axis) => {
+      const list = selected();
+      const units = new Map();
+      for (const q of list) { const k = q.group && list.filter((z) => z.group === q.group).length === S.objects.filter((z) => z.group === q.group).length ? 'g:' + q.group : 'o:' + q.id; if (!units.has(k)) units.set(k, []); units.get(k).push(q); }
+      const all = unionBBox(list); if (!all) return;
+      const target = units.size > 1 ? (axis === 'x' ? (all.x0 + all.x1) / 2 : (all.y0 + all.y1) / 2) : 0;
+      for (const u of units.values()) { const b = unionBBox(u); const c = axis === 'x' ? (b.x0 + b.x1) / 2 : (b.y0 + b.y1) / 2; if (Math.abs(target - c) > 1e-6) translate(u, axis === 'x' ? target - c : 0, axis === 'y' ? target - c : 0); }
+      checkpoint(); changed();
+    };
+    $('alignH').onclick = () => alignSel('x');
+    $('alignV').onclick = () => alignSel('y');
     $('fitSelBtn').onclick = async () => { const list = selected(), b = unionBBox(list), h = hoop(); if (!b) return; const k = Math.min((h.w - 12) / b.w, (h.h - 12) / b.h); const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2; await scale(list, k, k, cx, cy); translate(list, -cx, -cy); checkpoint(); changed(); fitView(); };
     $('dupBtn').onclick = duplicateSelected;
     $('delBtn').onclick = removeSelected;
@@ -7704,7 +7748,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       note.textContent = m.id === 'all' ? 'You will get a .zip with all five files inside.' : `Inside Claude, machine files arrive inside a .zip (unzip it, then copy the .${m.ext.toUpperCase()} file to your USB stick). The app file saves .${m.ext.toUpperCase()} directly.`;
       $('getAppBtn').hidden = false;
     } else { note.hidden = true; $('getAppBtn').hidden = true; }
-    $('doExport').textContent = m.id === 'all' ? 'Download all formats' : `Download .${m.ext.toUpperCase()}`;
+    $('doExport').textContent = canPick() ? (m.id === 'all' ? 'Save all formats…' : `Save .${m.ext.toUpperCase()}…`) : m.id === 'all' ? 'Download all formats' : `Download .${m.ext.toUpperCase()}`;
   }
   $('exportBtn').onclick = () => {
     if (!A || !A.stitches) { toast('Add something to the hoop first.'); return; }
@@ -7720,12 +7764,27 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     let ok;
     if (m.id === 'all') {
       const files = ['pes', 'jef', 'dst', 'exp', 'vp3'].map((f) => ({ name: `${name}.${f}`, data: buildFile(f, name) }));
-      ok = await saveFile(`${name}.zip`, Formats.zip(files));
+      ok = await saveWithPicker(`${name}.zip`, Formats.zip(files), 'Zip of all machine files', 'application/zip', '.zip');
     } else if (inClaude()) {
       ok = await saveFile(`${name}.zip`, Formats.zip([{ name: `${name}.${m.ext}`, data: buildFile(m.id, name) }]));
-    } else ok = await saveFile(`${name}.${m.ext}`, buildFile(m.id, name));
+    } else ok = await saveWithPicker(`${name}.${m.ext}`, buildFile(m.id, name), `${m.title} embroidery file`, 'application/octet-stream', `.${m.ext}`);
+    if (ok === 'cancel') { toast('Save cancelled.'); return; }
     if (ok) { ui.exported = true; updateSteps(); $('exportDlg').close(); toast('Saved.'); }
   };
+  // ask where to save (like Save project); falls back to a download where the browser can't
+  async function saveWithPicker(fileName, data, desc, mime, ext) {
+    if (canPick()) {
+      try {
+        const handle = await window.showSaveFilePicker({ suggestedName: fileName, startIn: ui.exportHandle || ui.fileHandle || 'documents', types: [{ description: desc, accept: { [mime]: [ext] } }] });
+        const w = await handle.createWritable(); await w.write(data); await w.close();
+        ui.exportHandle = handle;
+        return true;
+      } catch (e) {
+        if (e && e.name === 'AbortError') return 'cancel';
+      }
+    }
+    return saveFile(fileName, data);
+  }
   $('getAppBtn').onclick = () => saveFile('stitch-studio.html', new TextEncoder().encode(ORIGINAL_HTML));
   $('pngBtn').onclick = async () => {
     const b = designBounds(); if (!b) return;

@@ -60,7 +60,7 @@ async def main():
         await pg.fill('#txt', ''); await pg.dispatch_event('#txt','input'); await pg.wait_for_timeout(600)
         await pg.fill('#txt', 'Z'); await pg.dispatch_event('#txt','input'); await pg.wait_for_timeout(900)
         # --- export all formats
-        step('export'); 
+        step('export'); await pg.evaluate('delete window.showSaveFilePicker')  # downloads, as in browsers without a save dialog
         for m in ['pes','jef','dst','exp','vp3','all']:
             await pg.click('#exportBtn'); await pg.wait_for_timeout(300)
             await pg.locator(f'#machines input[value={m}]').locator('xpath=..').click(); await pg.wait_for_timeout(100)
