@@ -185,7 +185,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   const S = {
     objects: [],
     hoop: '100x100',
-    hoopTurn: false,
+    hoopTurn: true, // hoops start sideways
     fabric: 'woven',
     fabricColor: '#f4f1ea',
     knockout: true,
@@ -3942,7 +3942,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     $('brandSel').value = br;
     fillHoopSel(br);
     $('hoopSel').value = S.hoop; $('fabricSel').value = S.fabric;
-    $('hoopTurn').checked = !!S.hoopTurn;
+    $('hoopTurn').checked = !S.hoopTurn;
     const note = HOOP_BRANDS[br].note;
     $('hoopNote').hidden = !note; $('hoopNote').textContent = note || '';
     $('fabricTip').textContent = fab().tip;
@@ -3951,14 +3951,14 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
   }
   // machine, hoop and fabric choices are remembered on this computer for the next visit
   function saveSetup() {
-    try { localStorage.setItem('ss-setup', JSON.stringify({ hoop: S.hoop, hoopTurn: !!S.hoopTurn, fabric: S.fabric, fabricColor: S.fabricColor })); } catch (e) { }
+    try { localStorage.setItem('ss-setup', JSON.stringify({ hoop: S.hoop, upright: !S.hoopTurn, fabric: S.fabric, fabricColor: S.fabricColor })); } catch (e) { }
   }
   function loadSetup() {
     try {
       const d = JSON.parse(localStorage.getItem('ss-setup') || 'null');
       if (!d) return;
       if (d.hoop === 'bernina-clamp') d.hoop = 'bernina-medium-clamp'; // renamed
-      if (HOOPS.some((h) => h.id === d.hoop)) { S.hoop = d.hoop; S.hoopTurn = !!d.hoopTurn; }
+      if (HOOPS.some((h) => h.id === d.hoop)) { S.hoop = d.hoop; S.hoopTurn = !d.upright; } // (older saves: sideways is the new default)
       if (FABRICS[d.fabric]) S.fabric = d.fabric;
       if (/^#[0-9a-f]{6}$/i.test(d.fabricColor || '')) S.fabricColor = d.fabricColor;
     } catch (e) { }
@@ -3977,7 +3977,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     syncSettingsUI(); checkpoint(); renderStats(); fitView(); saveSetup();
     
   };
-  $('hoopTurn').onchange = (e) => { S.hoopTurn = e.target.checked; checkpoint(); renderStats(); fitView(); saveSetup(); };
+  $('hoopTurn').onchange = (e) => { S.hoopTurn = !e.target.checked; checkpoint(); renderStats(); fitView(); saveSetup(); };
   $('fabricSel').innerHTML = Object.entries(FABRICS).map(([k, f]) => `<option value="${k}">${f.name}</option>`).join('');
   $('hoopSel').onchange = (e) => { S.hoop = e.target.value; checkpoint(); renderStats(); fitView(); saveSetup(); };
   $('fabricSel').onchange = (e) => { S.fabric = e.target.value; syncSettingsUI(); checkpoint(); changed(); saveSetup();  };
