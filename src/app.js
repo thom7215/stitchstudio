@@ -2965,6 +2965,8 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         
         <div class="optrow"><span>On curves</span>${segHTML('curveMode', [['outer', 'Keep outside edge full'], ['center', 'Even in the middle']], P.curveMode || 'outer')}</div>
         <div class="optrow"><span>Short stitches</span><div class="angle"><span></span><input type="range" min="0" max="0.5" step="0.05" value="${sh}" data-param="shortAmt" aria-label="Short stitches on the inside of curves"><output>${sh === 0 ? 'Off' : Math.round(sh * 100) + '%'}</output></div></div>
+        ${sh > 0 ? `<div class="optrow" title="Stitches on the inside of a curve are shortened when their needle points would come closer together than this. Auto works it out from the spacing."><span>Shorten when closer than</span><div class="angle"><span class="sp-auto">${P.shortDist > 0 ? '<button type="button" class="link" data-auto="shortDist" title="Back to automatic">Auto</button>' : ''}</span><input type="range" min="0.2" max="0.8" step="0.02" value="${P.shortDist > 0 ? P.shortDist : +(sp * 0.8).toFixed(2)}" data-param="shortDist" aria-label="Short stitch distance"><output>${P.shortDist > 0 ? P.shortDist.toFixed(2) + ' mm' : 'Auto'}</output></div></div>
+        <div class="optrow" title="How far in the short stitches stop, as % of the column width. Several numbers (like 30 15) are used in turn for short stitches in a row. Leave empty for automatic."><span>Short stitch depths</span><input type="text" class="numlist" data-param="shortDepths" value="${esc(P.shortDepths || '')}" placeholder="Auto" aria-label="Short stitch depths in percent"><output>%</output></div>` : ''}
         <label class="check" title="Normally a satin stitch wider than 7.5 mm gets an extra needle point so it cannot snag. Tick this to sew each stitch all the way across."><input type="checkbox" data-param="keepWide" ${P.keepWide ? 'checked' : ''}> Keep wide stitches whole (don’t split over 7.5 mm)</label>
         `;
       if (o.kind === 'area') opts += `<div class="optrow"><span>Edge</span>${segHTML('border', [['none', 'None'], ['running', 'Outline'], ['satin', 'Satin border']], P.border)}</div>`;
@@ -2977,8 +2979,10 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     if (curType === 'fill' || curType === 'satin') {
       const pullV = P.pull == null ? fab().pull : P.pull;
       more = `<details class="more"><summary>More settings</summary><div class="opts">
-        <label class="check"><input type="checkbox" data-param="underlay" ${P.underlay !== false ? 'checked' : ''}> Underlay stitches (keeps the top layer smooth)</label>
+        ${curType === 'satin' ? `<div class="optrow" title="Stitches sewn first, under the satin. Auto: a centre walk under narrow columns, runs along both edges under medium ones, edge runs plus a criss-cross zig-zag under wide ones."><span>Underlay</span>${segHTML('underlayMode', [['auto', 'Auto'], ['center', 'Centre'], ['edge', 'Edges'], ['zigzag', 'Zig-zag'], ['edgezig', 'Edges + zig-zag'], ['none', 'None']], P.underlay === false ? 'none' : (P.underlayType || 'auto'))}</div>`
+          : `<label class="check"><input type="checkbox" data-param="underlay" ${P.underlay !== false ? 'checked' : ''}> Underlay stitches (keeps the top layer smooth)</label>`}
         <div class="optrow"><span>Pull compensation</span><div class="angle"><span></span><input type="range" min="0" max="0.8" step="0.05" value="${pullV}" data-param="pull" aria-label="Pull compensation"><output>${pullV.toFixed(2)} mm</output></div></div>
+        ${curType === 'satin' ? `<div class="optrow" title="Extra width added to each side as a share of the column's width, on top of the pull compensation above. Two numbers (like 10 5) set the two sides separately: rail 1, then rail 2."><span>Extra pull, % of width</span><input type="text" class="numlist" data-param="pullPct" value="${esc(P.pullPct || '')}" placeholder="0" aria-label="Pull compensation in percent of width"><output>%</output></div>` : ''}
         
       </div></details>`;
     }
@@ -3037,6 +3041,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       let v = b.dataset.val; if (v === 'true') v = true; else if (v === 'false') v = false;
       if (sg.dataset.param === 'satinDir' && v === 'guides') { startGuides(); return; }
       if (sg.dataset.param === 'satinDir' && v === 'columns') { startColumns(); return; }
+      if (sg.dataset.param === 'underlayMode') { for (const q of selected()) { q.params.underlay = v !== 'none'; if (v !== 'none') q.params.underlayType = v; } checkpoint(); changed(); return; }
       setParam(sg.dataset.param, v);
     }));
     box.querySelectorAll('input[type=range][data-param]').forEach((r) => {
@@ -3044,7 +3049,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       r.oninput = () => {
         const v = +r.value;
         const out = rowOf(r).querySelector('output');
-        if (out) out.textContent = k === 'angle' || k === 'satinAngle' ? v + '°' : k === 'shortAmt' ? (v === 0 ? 'Off' : Math.round(v * 100) + '%') : ((k === 'pull' || k === 'spacing') ? v.toFixed(2) : v.toFixed(1)) + ' mm';
+        if (out) out.textContent = k === 'angle' || k === 'satinAngle' ? v + '°' : k === 'shortAmt' ? (v === 0 ? 'Off' : Math.round(v * 100) + '%') : ((k === 'pull' || k === 'spacing' || k === 'shortDist') ? v.toFixed(2) : v.toFixed(1)) + ' mm';
         const dial = rowOf(r).querySelector('svg');
         if (dial && (k === 'angle' || k === 'satinAngle')) dial.outerHTML = angleDial(v);
         for (const q of selected()) q.params[k] = v;
@@ -3053,6 +3058,13 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       r.onchange = () => { checkpoint(); r.blur(); renderInspector(); };
     });
     box.querySelectorAll('input[type=checkbox][data-param]').forEach((c) => c.onchange = () => setParam(c.dataset.param, c.checked));
+    // lists of numbers ("30 15"): kept only if they read as numbers
+    box.querySelectorAll('input.numlist[data-param]').forEach((t) => t.onchange = () => {
+      const nums = t.value.split(/[\s,;]+/).filter(Boolean).map(Number);
+      if (nums.some((x) => !isFinite(x) || x < 0)) { toast('Use numbers only, like 30 or 30 15.'); t.value = ''; }
+      setParam(t.dataset.param, nums.every((x) => isFinite(x) && x >= 0) && nums.length ? nums.slice(0, 5).join(' ') : '');
+    });
+    box.querySelectorAll('[data-auto]').forEach((b) => b.onclick = () => setParam(b.dataset.auto, null));
     $('selColor').oninput = (e) => { for (const q of selected()) { q.color = normHex(e.target.value); } draw(); renderLayers(); scheduleGen(); };
     $('selColor').onchange = () => { checkpoint(); changed(); };
     const nm = $('selName'); if (nm) nm.onchange = () => { o.name = nm.value.trim() || o.name; checkpoint(); renderLayers(); };

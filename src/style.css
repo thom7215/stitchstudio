@@ -354,3 +354,8 @@ body.fontmode #leftTabs, body.fontmode [data-ltab], body.fontmode .steps, body.f
 #txtTrimRow[hidden] { display: none; }
 .objarrange:empty { display: none; }
 .objarrange { display: grid; gap: 8px; padding-top: 10px; margin-top: 4px; border-top: 1px solid var(--line); }
+.optrow input.numlist { width: 100%; min-width: 0; font: 13px var(--mono); padding: 5px 8px; }
+.optrow:has(input.numlist) { grid-template-columns: 1fr 120px auto; }
+.optrow:has(.seg[data-param=underlayMode]) { grid-template-columns: 1fr; gap: 4px; }
+.seg[data-param=underlayMode] { display: grid; grid-template-columns: repeat(3, 1fr); }
+.seg[data-param=underlayMode] button { border-radius: 0; }

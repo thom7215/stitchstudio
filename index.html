@@ -365,6 +365,11 @@ body.fontmode #leftTabs, body.fontmode [data-ltab], body.fontmode .steps, body.f
 #txtTrimRow[hidden] { display: none; }
 .objarrange:empty { display: none; }
 .objarrange { display: grid; gap: 8px; padding-top: 10px; margin-top: 4px; border-top: 1px solid var(--line); }
+.optrow input.numlist { width: 100%; min-width: 0; font: 13px var(--mono); padding: 5px 8px; }
+.optrow:has(input.numlist) { grid-template-columns: 1fr 120px auto; }
+.optrow:has(.seg[data-param=underlayMode]) { grid-template-columns: 1fr; gap: 4px; }
+.seg[data-param=underlayMode] { display: grid; grid-template-columns: repeat(3, 1fr); }
+.seg[data-param=underlayMode] button { border-radius: 0; }
 
 </style>
 </head>
@@ -915,18 +920,57 @@ const Core = (() => {
   }
 
   /* ---------- satin from rungs ---------- */
+  // the satin settings that travel with every column
+  const satX = (p) => ({ pullPct: p.pullPct, underlayType: p.underlayType, shortDist: p.shortDist, shortDepths: p.shortDepths });
   function satinFromRungs(rungs, o) {
     const pull = o.pull, maxLen = o.maxLen ?? 7.5;
     if (!rungs.length) return [];
+    // pull compensation: a fixed amount plus a share of the width, each side (the two sides can differ)
+    const pp = o.pullPct || [0, 0], pa = (pp[0] || 0) / 100, pb = (pp[1] ?? pp[0] ?? 0) / 100;
     const R = rungs.map(([a, b]) => {
       const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1e-9;
-      const ux = dx / L, uy = dy / L;
-      return { a: [a[0] - ux * pull, a[1] - uy * pull], b: [b[0] + ux * pull, b[1] + uy * pull], w: L, m: lerp(a, b, 0.5) };
+      const ux = dx / L, uy = dy / L, ea = pull + pa * L, eb = pull + pb * L;
+      return { a: [a[0] - ux * ea, a[1] - uy * ea], b: [b[0] + ux * eb, b[1] + uy * eb], w: L, m: lerp(a, b, 0.5) };
     });
     const out = [];
     const avgW = R.reduce((s, r) => s + r.w, 0) / R.length;
     let forward = true;
-    if (o.underlay && R.length > 2) {
+    // which underlay: a centre walk for narrow columns, runs along both edges for medium ones, edge runs and a
+    // criss-cross zig-zag for wide ones (or whatever was picked)
+    let ut = o.underlayType || 'auto';
+    if (ut === 'auto') ut = avgW < 2 ? 'center' : avgW < 4.5 ? 'edge' : 'edgezig';
+    if (o.heavy && ut === 'center') ut = 'zigzag';
+    const zig = (from, to, offset, stepMM) => {
+      const pts = [], step = Math.max(1, Math.round(stepMM / o.rungStep)), ins = Math.min(0.45, avgW * 0.18) + pull;
+      const dir = to >= from ? 1 : -1;
+      let side = offset;
+      for (let i = from; dir > 0 ? i <= to : i >= to; i += step * dir) {
+        const r = R[i], L = dist(r.a, r.b);
+        if (L < 2 * ins + 0.3) { pts.push(r.m); continue; }
+        const t = ins / L; pts.push(side ? lerp(r.a, r.b, 1 - t) : lerp(r.a, r.b, t)); side ^= 1;
+      }
+      return pts;
+    };
+    // a line just inside one edge of the column (inset from the drawn edge, not the pulled-out one)
+    const edgeLine = (sideB) => {
+      const ins = clamp(avgW * 0.16, 0.25, 0.6);
+      return rungs.map(([a, b]) => { const L = dist(a, b); if (L < 2 * ins + 0.2) return lerp(a, b, 0.5); const t = ins / L; return sideB ? lerp(a, b, 1 - t) : lerp(a, b, t); });
+    };
+    if (o.underlay && R.length > 2 && ut !== 'center' && !testOpts.oldUnderlay) {
+      const n = R.length - 1;
+      if (ut === 'edge' || ut === 'edgezig') {
+        // along one edge to the end, back along the other: ends where the top layer starts
+        out.push(...runPath(edgeLine(false), o.closed, 1.8, false));
+        const back = edgeLine(true).slice().reverse();
+        out.push(...runPath(back, o.closed, 1.8, false).slice(1));
+      }
+      if (ut === 'zigzag' || ut === 'edgezig') {
+        // there and back, the return offset by half a step: a criss-cross that also ends at the start
+        out.push(...zig(0, n, 0, 3.2));
+        out.push(...zig(n, 0, 1, 3.2));
+      }
+      forward = true;
+    } else if (o.underlay && R.length > 2) {
       // centre walk
       const mids = R.map((r) => r.m);
       out.push(...runPath(mids, o.closed, 2.0, false));
@@ -1011,7 +1055,11 @@ const Core = (() => {
     // when that edge has moved on far enough since the last full one; the ones in between stop short, at a
     // depth where the stitches are no longer crowded, alternating two depths so their ends don't line up.
     const SS = [SA, SB], lastFull = [-1, -1];
-    const sideGap = 2 * (o.target || 0.2) * 0.8;
+    // how close needle points on the inside edge may get before stitches are shortened (on one side, points
+    // come every other stitch); and, if set, the depths of consecutive short stitches as shares of the width
+    const sideGap = o.shortDist > 0 ? o.shortDist : 2 * (o.target || 0.2) * 0.8;
+    const depths = Array.isArray(o.shortDepths) && o.shortDepths.length ? o.shortDepths.map((v) => clamp(v / 100, 0.03, 0.7)) : null;
+    const run = [0, 0];
     let prev = out.length ? out[out.length - 1] : null;
     order.forEach((k, n) => {
       const r = K[k];
@@ -1025,12 +1073,16 @@ const Core = (() => {
         }
       } else if (shortAmt > 0 && q < 0.85 && !(side === 0 ? r.cutA : r.cutB)) {
         const moved = lastFull[side] < 0 ? Infinity : Math.abs(SS[side][k] - SS[side][lastFull[side]]);
-        if (moved >= sideGap) lastFull[side] = k;
+        if (moved >= sideGap) { lastFull[side] = k; run[side] = 0; }
         else {
           cnt[side]++;
-          // depth where the spacing has grown to about three quarters of the outside's
-          const depth = clamp((0.75 - q) / Math.max(1 - q, 1e-6), 0.12, 0.6) * (shortAmt / 0.3);
-          const amt = clamp(depth * (cnt[side] % 2 ? 1 : 0.6), 0.08, 0.65);
+          let amt;
+          if (depths) amt = depths[run[side]++ % depths.length];
+          else {
+            // depth where the spacing has grown to about three quarters of the outside's
+            const depth = clamp((0.75 - q) / Math.max(1 - q, 1e-6), 0.12, 0.6) * (shortAmt / 0.3);
+            amt = clamp(depth * (cnt[side] % 2 ? 1 : 0.6), 0.08, 0.65);
+          }
           p = side === 0 ? lerp(r.a, r.b, amt) : lerp(r.b, r.a, amt);
         }
       }
@@ -1211,7 +1263,7 @@ const Core = (() => {
     for (const { r, rev } of orderRegions(regs, back, pos)) {
       const rr = rev ? r.rows.slice().reverse() : r.rows;
       const rungs = rr.map((row) => [back(row.iv[0], row.y), back(row.iv[1], row.y)]);
-      const pts = satinFromRungs(rungs, { maxLen: p.maxLen, pull: p.pull, underlay: p.underlay !== 'none', heavy: p.underlay === 'heavy', rungStep: step });
+      const pts = satinFromRungs(rungs, { maxLen: p.maxLen, pull: p.pull, underlay: p.underlay !== 'none', heavy: p.underlay === 'heavy', rungStep: step, ...satX(p) });
       if (pts.length) { segs.push({ pts, phase: 'top' }); pos = pts[pts.length - 1]; }
     }
     return segs;
@@ -1995,7 +2047,7 @@ const Core = (() => {
         for (const [rev, swap] of c.closed ? [[false, false], [false, true]] : [[false, false], [false, true], [true, false], [true, true]]) {
           let rungs = rev ? c.rungs.slice().reverse() : c.rungs;
           if (rev !== swap) rungs = rungs.map(flipRung);
-          const pts = satinFromRungs(rungs, { maxLen: p.maxLen, pull: p.pull, underlay: p.underlay !== 'none' && rungs.length > 6, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, closed: c.closed });
+          const pts = satinFromRungs(rungs, { maxLen: p.maxLen, pull: p.pull, underlay: p.underlay !== 'none' && rungs.length > 6, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, ...satX(p), closed: c.closed });
           if (pts.length) opts.push({ pts, s: pts[0], e: pts[pts.length - 1] });
         }
         if (opts.length) items.push({ ci, opts });
@@ -2018,7 +2070,7 @@ const Core = (() => {
       });
       const c = left.splice(bi, 1)[0];
       let rungs = rev ? c.rungs.slice().reverse().map((r) => { const q = [r[1], r[0]]; q.cutA = r.cutB; q.cutB = r.cutA; return q; }) : c.rungs;
-      const pts = satinFromRungs(rungs, { maxLen: p.maxLen, pull: p.pull, underlay: p.underlay !== 'none' && rungs.length > 6, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, closed: c.closed });
+      const pts = satinFromRungs(rungs, { maxLen: p.maxLen, pull: p.pull, underlay: p.underlay !== 'none' && rungs.length > 6, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, ...satX(p), closed: c.closed });
       if (pts.length) { segs.push({ pts, phase: 'top', joinInside: true }); pos = pts[pts.length - 1]; }
     }
     return segs;
@@ -2264,7 +2316,7 @@ const Core = (() => {
       const r = guideRungs(ctx, g, D[gi], step);
       if (!r || r.rungs.length < 2) return;
       if (r.outside) outside = true;
-      const out = satinFromRungs(r.rungs, { maxLen: p.maxLen, pull: p.pull, underlay: p.underlay !== 'none' && r.rungs.length > 6, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, closed: r.closed, endForward: true });
+      const out = satinFromRungs(r.rungs, { maxLen: p.maxLen, pull: p.pull, underlay: p.underlay !== 'none' && r.rungs.length > 6, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, ...satX(p), closed: r.closed, endForward: true });
       if (out.length) segs.push({ pts: out, phase: 'top', joinInside: true });
     });
     if (outside && warn) warn('Part of a satin path runs outside the shape.');
@@ -2754,7 +2806,7 @@ const Core = (() => {
         for (const [rev, swap] of variants) {
           let rungs = rev ? base.slice().reverse() : base;
           if (rev !== swap) rungs = rungs.map(flipRung);
-          const out = satinFromRungs(rungs, { maxLen: p.maxLen, pull: p.pull, underlay: p.underlay !== 'none' && rungs.length > 6, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, closed: piece.closed, endForward: true });
+          const out = satinFromRungs(rungs, { maxLen: p.maxLen, pull: p.pull, underlay: p.underlay !== 'none' && rungs.length > 6, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, ...satX(p), pullPct: p.pullPct && rev !== swap ? [p.pullPct[1] ?? p.pullPct[0], p.pullPct[0]] : p.pullPct, closed: piece.closed, endForward: true });
           if (out.length) opts.push({ rev, swap, out, s: out[0], e: out[out.length - 1] });
         }
         if (opts.length) items.push({ ci, opts });
@@ -2885,7 +2937,7 @@ const Core = (() => {
         const nx = -T[i][1], ny = T[i][0];
         return [[c[0] + nx * h, c[1] + ny * h], [c[0] - nx * h, c[1] - ny * h]];
       });
-      const pts = satinFromRungs(rungs, { maxLen: p.maxLen, pull: p.pull, underlay: p.underlay !== 'none' && width > 1.4, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, closed: q.closed });
+      const pts = satinFromRungs(rungs, { maxLen: p.maxLen, pull: p.pull, underlay: p.underlay !== 'none' && width > 1.4, heavy: p.underlay === 'heavy', rungStep: step, target: p.spacing / 2, outerFull: p.curveMode !== 'center', shortAmt: p.shortAmt, ...satX(p), closed: q.closed });
       // running stitch along an edge of the satin (patch style)
       const runs = [];
       if (er) {
@@ -2970,6 +3022,12 @@ const Core = (() => {
     return { type: 'fill', why: `Wide shape (${D.toFixed(0)} mm across): fill` };
   }
 
+  // "12" or "12 6" (or numbers already) to a list of numbers; anything else to null
+  function parseNums(v) {
+    if (v == null || v === '' || v === 'auto') return null;
+    const a = (Array.isArray(v) ? v : String(v).split(/[\s,;]+/)).map(Number).filter((x) => isFinite(x));
+    return a.length ? a : null;
+  }
   function generate(o, occ, fab, start) {
     const warn = [];
     const addWarn = (m) => { if (!warn.includes(m)) warn.push(m); };
@@ -2984,6 +3042,10 @@ const Core = (() => {
       stitchLen: 4.0,
       // satin stitches longer than this get an extra needle point; 'keep wide stitches whole' turns that off
       maxLen: o.params.keepWide ? 1e9 : 7.5,
+      pullPct: parseNums(o.params.pullPct),
+      underlayType: o.params.underlayType || 'auto',
+      shortDist: o.params.shortDist > 0 ? o.params.shortDist : 0,
+      shortDepths: parseNums(o.params.shortDepths),
       autoOrder: !!o.params.autoOrder,
       overlap: o.params.overlap, // 'allow' keeps the old behaviour (strokes may lie on top of each other); for testing
       runLen: o.params.runLen || 2.5,
@@ -7022,6 +7084,8 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
         
         <div class="optrow"><span>On curves</span>${segHTML('curveMode', [['outer', 'Keep outside edge full'], ['center', 'Even in the middle']], P.curveMode || 'outer')}</div>
         <div class="optrow"><span>Short stitches</span><div class="angle"><span></span><input type="range" min="0" max="0.5" step="0.05" value="${sh}" data-param="shortAmt" aria-label="Short stitches on the inside of curves"><output>${sh === 0 ? 'Off' : Math.round(sh * 100) + '%'}</output></div></div>
+        ${sh > 0 ? `<div class="optrow" title="Stitches on the inside of a curve are shortened when their needle points would come closer together than this. Auto works it out from the spacing."><span>Shorten when closer than</span><div class="angle"><span class="sp-auto">${P.shortDist > 0 ? '<button type="button" class="link" data-auto="shortDist" title="Back to automatic">Auto</button>' : ''}</span><input type="range" min="0.2" max="0.8" step="0.02" value="${P.shortDist > 0 ? P.shortDist : +(sp * 0.8).toFixed(2)}" data-param="shortDist" aria-label="Short stitch distance"><output>${P.shortDist > 0 ? P.shortDist.toFixed(2) + ' mm' : 'Auto'}</output></div></div>
+        <div class="optrow" title="How far in the short stitches stop, as % of the column width. Several numbers (like 30 15) are used in turn for short stitches in a row. Leave empty for automatic."><span>Short stitch depths</span><input type="text" class="numlist" data-param="shortDepths" value="${esc(P.shortDepths || '')}" placeholder="Auto" aria-label="Short stitch depths in percent"><output>%</output></div>` : ''}
         <label class="check" title="Normally a satin stitch wider than 7.5 mm gets an extra needle point so it cannot snag. Tick this to sew each stitch all the way across."><input type="checkbox" data-param="keepWide" ${P.keepWide ? 'checked' : ''}> Keep wide stitches whole (don’t split over 7.5 mm)</label>
         `;
       if (o.kind === 'area') opts += `<div class="optrow"><span>Edge</span>${segHTML('border', [['none', 'None'], ['running', 'Outline'], ['satin', 'Satin border']], P.border)}</div>`;
@@ -7034,8 +7098,10 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
     if (curType === 'fill' || curType === 'satin') {
       const pullV = P.pull == null ? fab().pull : P.pull;
       more = `<details class="more"><summary>More settings</summary><div class="opts">
-        <label class="check"><input type="checkbox" data-param="underlay" ${P.underlay !== false ? 'checked' : ''}> Underlay stitches (keeps the top layer smooth)</label>
+        ${curType === 'satin' ? `<div class="optrow" title="Stitches sewn first, under the satin. Auto: a centre walk under narrow columns, runs along both edges under medium ones, edge runs plus a criss-cross zig-zag under wide ones."><span>Underlay</span>${segHTML('underlayMode', [['auto', 'Auto'], ['center', 'Centre'], ['edge', 'Edges'], ['zigzag', 'Zig-zag'], ['edgezig', 'Edges + zig-zag'], ['none', 'None']], P.underlay === false ? 'none' : (P.underlayType || 'auto'))}</div>`
+          : `<label class="check"><input type="checkbox" data-param="underlay" ${P.underlay !== false ? 'checked' : ''}> Underlay stitches (keeps the top layer smooth)</label>`}
         <div class="optrow"><span>Pull compensation</span><div class="angle"><span></span><input type="range" min="0" max="0.8" step="0.05" value="${pullV}" data-param="pull" aria-label="Pull compensation"><output>${pullV.toFixed(2)} mm</output></div></div>
+        ${curType === 'satin' ? `<div class="optrow" title="Extra width added to each side as a share of the column's width, on top of the pull compensation above. Two numbers (like 10 5) set the two sides separately: rail 1, then rail 2."><span>Extra pull, % of width</span><input type="text" class="numlist" data-param="pullPct" value="${esc(P.pullPct || '')}" placeholder="0" aria-label="Pull compensation in percent of width"><output>%</output></div>` : ''}
         
       </div></details>`;
     }
@@ -7094,6 +7160,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       let v = b.dataset.val; if (v === 'true') v = true; else if (v === 'false') v = false;
       if (sg.dataset.param === 'satinDir' && v === 'guides') { startGuides(); return; }
       if (sg.dataset.param === 'satinDir' && v === 'columns') { startColumns(); return; }
+      if (sg.dataset.param === 'underlayMode') { for (const q of selected()) { q.params.underlay = v !== 'none'; if (v !== 'none') q.params.underlayType = v; } checkpoint(); changed(); return; }
       setParam(sg.dataset.param, v);
     }));
     box.querySelectorAll('input[type=range][data-param]').forEach((r) => {
@@ -7101,7 +7168,7 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       r.oninput = () => {
         const v = +r.value;
         const out = rowOf(r).querySelector('output');
-        if (out) out.textContent = k === 'angle' || k === 'satinAngle' ? v + '°' : k === 'shortAmt' ? (v === 0 ? 'Off' : Math.round(v * 100) + '%') : ((k === 'pull' || k === 'spacing') ? v.toFixed(2) : v.toFixed(1)) + ' mm';
+        if (out) out.textContent = k === 'angle' || k === 'satinAngle' ? v + '°' : k === 'shortAmt' ? (v === 0 ? 'Off' : Math.round(v * 100) + '%') : ((k === 'pull' || k === 'spacing' || k === 'shortDist') ? v.toFixed(2) : v.toFixed(1)) + ' mm';
         const dial = rowOf(r).querySelector('svg');
         if (dial && (k === 'angle' || k === 'satinAngle')) dial.outerHTML = angleDial(v);
         for (const q of selected()) q.params[k] = v;
@@ -7110,6 +7177,13 @@ const ORIGINAL_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       r.onchange = () => { checkpoint(); r.blur(); renderInspector(); };
     });
     box.querySelectorAll('input[type=checkbox][data-param]').forEach((c) => c.onchange = () => setParam(c.dataset.param, c.checked));
+    // lists of numbers ("30 15"): kept only if they read as numbers
+    box.querySelectorAll('input.numlist[data-param]').forEach((t) => t.onchange = () => {
+      const nums = t.value.split(/[\s,;]+/).filter(Boolean).map(Number);
+      if (nums.some((x) => !isFinite(x) || x < 0)) { toast('Use numbers only, like 30 or 30 15.'); t.value = ''; }
+      setParam(t.dataset.param, nums.every((x) => isFinite(x) && x >= 0) && nums.length ? nums.slice(0, 5).join(' ') : '');
+    });
+    box.querySelectorAll('[data-auto]').forEach((b) => b.onclick = () => setParam(b.dataset.auto, null));
     $('selColor').oninput = (e) => { for (const q of selected()) { q.color = normHex(e.target.value); } draw(); renderLayers(); scheduleGen(); };
     $('selColor').onchange = () => { checkpoint(); changed(); };
     const nm = $('selName'); if (nm) nm.onchange = () => { o.name = nm.value.trim() || o.name; checkpoint(); renderLayers(); };
