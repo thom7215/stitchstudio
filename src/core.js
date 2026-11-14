@@ -441,16 +441,31 @@ const Core = (() => {
     if (o.closed) order.push(order[0]);
     const shortAmt = o.shortAmt ?? 0;
     const cnt = [0, 0];
+    // short stitches on the inside of a curve: the inside edge is shorter than the outside, so needle points
+    // crowd there and the thread piles up into a lumpy edge. A stitch goes all the way to the inside edge only
+    // when that edge has moved on far enough since the last full one; the ones in between stop short, at a
+    // depth where the stitches are no longer crowded, alternating two depths so their ends don't line up.
+    const SS = [SA, SB], lastFull = [-1, -1];
+    const sideGap = 2 * (o.target || 0.2) * 0.8;
     let prev = out.length ? out[out.length - 1] : null;
     order.forEach((k, n) => {
       const r = K[k];
       const side = n % 2;
       let p = side === 0 ? r.a : r.b;
       const q = squeeze[k][side];
-      if (shortAmt > 0 && q < 0.62) {
-        cnt[side]++;
-        if (cnt[side] % 2 === 1) {
-          const amt = shortAmt * clamp((0.62 - q) / 0.42, 0.35, 1);
+      if (testOpts.oldShort) {
+        if (shortAmt > 0 && q < 0.62) {
+          cnt[side]++;
+          if (cnt[side] % 2 === 1) { const amt = shortAmt * clamp((0.62 - q) / 0.42, 0.35, 1); p = side === 0 ? lerp(r.a, r.b, amt) : lerp(r.b, r.a, amt); }
+        }
+      } else if (shortAmt > 0 && q < 0.85 && !(side === 0 ? r.cutA : r.cutB)) {
+        const moved = lastFull[side] < 0 ? Infinity : Math.abs(SS[side][k] - SS[side][lastFull[side]]);
+        if (moved >= sideGap) lastFull[side] = k;
+        else {
+          cnt[side]++;
+          // depth where the spacing has grown to about three quarters of the outside's
+          const depth = clamp((0.75 - q) / Math.max(1 - q, 1e-6), 0.12, 0.6) * (shortAmt / 0.3);
+          const amt = clamp(depth * (cnt[side] % 2 ? 1 : 0.6), 0.08, 0.65);
           p = side === 0 ? lerp(r.a, r.b, amt) : lerp(r.b, r.a, amt);
         }
       }
@@ -1843,6 +1858,55 @@ const Core = (() => {
     if (closed && dist(out[0], out[out.length - 1]) < 1e-4) out.pop();
     return out;
   }
+  /* Traced outlines are polygons (flat runs and small kinks every 1–2 mm on a curve, plus pixel steps), and a
+     rail that follows the edge takes them on: the satin edge shows flats and the stitch angle steps at every
+     kink. The rail is smoothed before stitches are laid: resampled finely and averaged with a Gaussian of
+     about half a millimetre. Real corners (a turn of more than ~40° within a millimetre) are kept sharp, and
+     the ends stay where they are. */
+  function smoothRail(P, closed) {
+    if (testOpts.noRailSmooth || !P || P.length < 3) return P;
+    const step = 0.15;
+    const Q = resample(P, step, closed);
+    const n = Q.length;
+    if (n < 5) return P;
+    const at = (i) => Q[closed ? ((i % n) + n) % n : clamp(i, 0, n - 1)];
+    // corners: direction change over ±0.6 mm
+    const span = Math.max(2, Math.round(0.6 / step));
+    const corner = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      if (!closed && (i < span || i > n - 1 - span)) continue;
+      const a = at(i - span), b = at(i), c = at(i + span);
+      const u = Math.atan2(b[1] - a[1], b[0] - a[0]), v = Math.atan2(c[1] - b[1], c[0] - b[0]);
+      let d = Math.abs(v - u); if (d > Math.PI) d = 2 * Math.PI - d;
+      if (d > (testOpts.cornerTurn ?? 40) * Math.PI / 180) corner[i] = 1;
+    }
+    // keep the sharpest point of each corner run fixed; smooth between fixed points
+    const fixed = new Uint8Array(n);
+    if (!closed) { fixed[0] = 1; fixed[n - 1] = 1; }
+    for (let i = 0; i < n; i++) if (corner[i]) {
+      let j = i; while (j + 1 < n && corner[j + 1]) j++;
+      fixed[(i + j) >> 1] = 1; i = j;
+    }
+    const sigma = (testOpts.railSigma ?? 0.45) / step, K = Math.ceil(sigma * 2.5);
+    const wts = []; for (let k = -K; k <= K; k++) wts.push(Math.exp(-(k * k) / (2 * sigma * sigma)));
+    const out = Q.map((q, i) => {
+      if (fixed[i]) return q;
+      let sx = 0, sy = 0, sw = 0;
+      for (let k = -K; k <= K; k++) {
+        const j = i + k;
+        if (!closed && (j < 0 || j >= n)) break;
+        // don't average across a fixed point (a corner or an end)
+        let blocked = false;
+        const lo = Math.min(i, j), hi = Math.max(i, j);
+        for (let t = lo + 1; t < hi; t++) if (fixed[closed ? t % n : t]) { blocked = true; break; }
+        if (blocked) continue;
+        const q2 = at(j), w = wts[k + K];
+        sx += q2[0] * w; sy += q2[1] * w; sw += w;
+      }
+      return sw ? [sx / sw, sy / sw] : q;
+    });
+    return out;
+  }
   function cumLen(P, closed) {
     const c = [0];
     for (let i = 1; i < P.length; i++) c.push(c[i - 1] + dist(P[i - 1], P[i]));
@@ -1873,6 +1937,7 @@ const Core = (() => {
   /* resolve a column into matched rails and rung positions */
   function columnLayout(rings, col) {
     let A = railDense(col.A, rings), B = railDense(col.B, rings, [A]);
+    A = smoothRail(A, !!col.A.closed); B = smoothRail(B, !!col.B.closed);
     if (A.length < 2 || B.length < 2) return null;
     const closed = !!(col.A.closed && col.B.closed && A.length >= 3 && B.length >= 3);
     if (!closed) {
@@ -2139,7 +2204,7 @@ const Core = (() => {
   }
   /* a traced satin border: a rail with a width, sitting inside, on, or outside the line */
   function borderPath(rings, b) {
-    let P = railDense(b.R, rings);
+    let P = smoothRail(railDense(b.R, rings), !!b.R.closed);
     const closed = !!b.R.closed && P.length >= 3;
     if (P.length < 2) return null;
     P = resample(P, 0.2, closed);
